@@ -19,13 +19,23 @@ def test_gradient_check_simple():
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
         torch.cuda.manual_seed_all(42)
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.manual_seed(42)
 
     # Set deterministic algorithms for reproducibility
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = torch.float64
+    # Determine device: prefer CUDA > MPS > CPU
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
+
+    # MPS doesn't support float64, use float32 instead
+    dtype = torch.float32 if device.type == 'mps' else torch.float64
     
     print(f"Using device: {device}, dtype: {dtype}")
     

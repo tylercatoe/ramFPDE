@@ -26,6 +26,8 @@ class TestODEintEquivalence(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed(42)
             torch.cuda.manual_seed_all(42)
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            torch.mps.manual_seed(42)
 
         # Set deterministic algorithms for reproducibility
         torch.backends.cudnn.deterministic = True
@@ -115,6 +117,13 @@ class TestODEintEquivalence(unittest.TestCase):
             self._test_on_device(device)
         else:
             self.skipTest("CUDA not available")
+
+    def test_on_mps(self):
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = torch.device('mps')
+            self._test_on_device(device)
+        else:
+            self.skipTest("MPS not available")
 
 
 if __name__ == '__main__':

@@ -61,6 +61,8 @@ class TestDtypePreservation(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed(self.seed)
             torch.cuda.manual_seed_all(self.seed)
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            torch.mps.manual_seed(self.seed)
         np.random.seed(self.seed)
         random.seed(self.seed)
 
@@ -73,8 +75,16 @@ class TestDtypePreservation(unittest.TestCase):
         # Skip if dtype not supported on device
         if device == 'cuda' and not torch.cuda.is_available():
             self.skipTest("CUDA not available")
+        if device == 'mps' and not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
+            self.skipTest("MPS not available")
         if dtype == torch.bfloat16 and device == 'cuda' and not torch.cuda.is_bf16_supported():
             self.skipTest("bfloat16 not supported on this GPU")
+        if dtype == torch.float64 and device == 'mps':
+            self.skipTest("MPS doesn't support float64")
+        if dtype == torch.float16 and device == 'mps':
+            self.skipTest("MPS doesn't support float16 well")
+        if dtype == torch.bfloat16 and device == 'mps':
+            self.skipTest("MPS doesn't support bfloat16")
 
         # Reseed for deterministic random tensor generation
         torch.manual_seed(self.seed)
@@ -117,7 +127,11 @@ class TestDtypePreservation(unittest.TestCase):
     def test_float16_cuda(self):
         """Test float16 preservation on CUDA."""
         self._test_dtype_preservation(torch.float16, 'cuda')
-        
+
+    def test_float32_mps(self):
+        """Test float32 preservation on MPS."""
+        self._test_dtype_preservation(torch.float32, 'mps')
+
     def test_float64_gradients(self):
         """Test that gradients preserve float64."""
         if not torch.cuda.is_available():

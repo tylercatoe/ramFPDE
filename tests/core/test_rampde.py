@@ -45,6 +45,8 @@ class TestODEintEquivalence(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed(self.seed)
             torch.cuda.manual_seed_all(self.seed)
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            torch.mps.manual_seed(self.seed)
         np.random.seed(self.seed)
         random.seed(self.seed)
 
@@ -183,6 +185,27 @@ class TestODEintEquivalence(unittest.TestCase):
             self._run_test(lambda: self.ODEFunc(), x0, t, device, method='euler')
         else:
             self.skipTest("CUDA not available")
+
+    def test_linear_odefunc_on_mps(self):
+        print("\nRunning test_linear_odefunc_on_mps\n")
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = torch.device('mps')
+            d = 10
+            x0 = torch.ones(d)
+            t = torch.linspace(0, 10, 100)
+            self._run_test(lambda: self.LinearODEFunc(d), x0, t, device, method='euler')
+        else:
+            self.skipTest("MPS not available")
+
+    def test_neural_odefunc_on_mps(self):
+        print("\nRunning test_neural_odefunc_on_mps\n")
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = torch.device('mps')
+            x0 = torch.ones(2)
+            t = torch.linspace(0., 25., 1000)
+            self._run_test(lambda: self.ODEFunc(), x0, t, device, method='euler')
+        else:
+            self.skipTest("MPS not available")
 
 if __name__ == '__main__':
     unittest.main()

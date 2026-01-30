@@ -138,13 +138,23 @@ def test_simple_ode_func():
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
         torch.cuda.manual_seed_all(42)
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.manual_seed(42)
 
     # Set deterministic algorithms for reproducibility
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = torch.float64  # Use double precision for accurate gradients
+    # Determine device: prefer CUDA > MPS > CPU
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
+
+    # MPS doesn't support float64, use float32 instead
+    dtype = torch.float32 if device.type == 'mps' else torch.float64
     
     print(f"Using device: {device}, dtype: {dtype}")
     
@@ -193,22 +203,35 @@ def test_precision_robustness():
     if torch.cuda.is_available():
         torch.cuda.manual_seed(42)
         torch.cuda.manual_seed_all(42)
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.manual_seed(42)
 
     # Set deterministic algorithms for reproducibility
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    precisions = [torch.float64, torch.float32, torch.float16]
+    # Determine device: prefer CUDA > MPS > CPU
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
+
+    # MPS doesn't support float64 or float16
+    if device.type == 'mps':
+        precisions = [torch.float32]
+    else:
+        precisions = [torch.float64, torch.float32, torch.float16]
     
     results = {}
     
     for dtype in precisions:
         print(f"\nTesting with {dtype}...")
         
-        # Skip float16 if not supported
-        if dtype == torch.float16 and device.type == "cpu":
-            print("  Skipping float16 on CPU")
+        # Skip float16 if not supported on CPU or MPS
+        if dtype == torch.float16 and device.type in ["cpu", "mps"]:
+            print(f"  Skipping float16 on {device.type}")
             continue
             
         try:

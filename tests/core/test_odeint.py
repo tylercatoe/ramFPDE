@@ -32,13 +32,23 @@ class TestFixedGridODESolver(unittest.TestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed(42)
             torch.cuda.manual_seed_all(42)
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            torch.mps.manual_seed(42)
 
         # Set deterministic algorithms for reproducibility
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
-        self.dtype = torch.float64
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # Determine device: prefer CUDA > MPS > CPU
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device('mps')
+        else:
+            self.device = torch.device('cpu')
+
+        # MPS doesn't support float64, use float32 instead
+        self.dtype = torch.float32 if self.device.type == 'mps' else torch.float64
         self.A = torch.randn(2, 2, dtype=self.dtype, device=self.device)
         self.A = - self.A @ self.A.T *0.05
         class FuncModule(torch.nn.Module):
@@ -84,7 +94,7 @@ class TestFixedGridODESolver(unittest.TestCase):
                 for i in range(max_iterations):
                     self.num_steps = num_steps
                     self.t = torch.linspace(0, self.T, self.num_steps + 1, dtype=self.dtype, device=self.device)
-                    with autocast(device_type='cpu',dtype= self.dtype):
+                    with autocast(device_type=self.device.type, dtype=self.dtype):
                         yt = odeint(self.func, self.y0, self.t, method=solver.name)
                     error = torch.norm(yt[-1] - y_analytical, dim=-1).max().item()
                     
@@ -119,6 +129,11 @@ class TestFixedGridODESolver(unittest.TestCase):
     
         
 if __name__ == '__main__':
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = torch.device('mps')
+    else:
+        device = torch.device('cpu')
     print(f"Running tests on {device}")
     unittest.main()
