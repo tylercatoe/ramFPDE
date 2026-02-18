@@ -17,7 +17,7 @@ from .loss_scalers import DynamicScaler
 TensorType = TypeVar('TensorType', bound=torch.Tensor)
 TupleOrTensor = Union[torch.Tensor, Tuple[torch.Tensor, ...]]
 ScalerType = Union[DynamicScaler, None, Literal[False]]
-MethodType = Literal['euler', 'rk4']
+MethodType = Literal['l1', 'euler', 'rk4']
 
 
 def _tensor_to_tuple(
@@ -111,7 +111,7 @@ def odeint(
     y0: TupleOrTensor, 
     t: torch.Tensor, 
     *, 
-    method: MethodType = 'rk4', 
+    method: MethodType = 'l1', 
     beta: Optional[torch.Tensor] = None,
     atol: Optional[float] = None, 
     rtol: Optional[float] = None, 
