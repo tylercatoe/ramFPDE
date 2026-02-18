@@ -274,7 +274,8 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
                 if grad_t is not None and gdtk2 is not None:
                     gdtk2_hi = gdtk2.to(dtype_hi) / scaler.S
                     grad_t[k].add_(scale_factor * (gtk - gdtk)).sub_(gdtk2_hi)
-                    grad_t[k + 1].add_(scale_factor * gdtk).add_(gdtk2_hi)
+                    if k + 1 < len(grad_t):
+                        grad_t[k + 1].add_(scale_factor * gdtk).add_(gdtk2_hi)
                 
                 # Check for overflow in accumulated gradients with enhanced error reporting
                 if _is_any_infinite((a, grad_t, grad_theta)):
