@@ -90,8 +90,8 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
         
         # Backward pass loop with dynamic scaling
         with torch.no_grad():
-            for k in reversed(range(N)):
-                dtk = t[k + 1] - t[k]
+            for k in reversed(range(1, N)):
+                dtk = t[k] - t[k - 1]
                 
                 # Initalize adjoint gradient
                 da = 0.0

@@ -33,6 +33,7 @@ def test_gradient_check_simple():
         device = torch.device('mps')
     else:
         device = torch.device('cpu')
+    
 
     # MPS doesn't support float64, use float32 instead
     dtype = torch.float32 if device.type == 'mps' else torch.float64
@@ -70,6 +71,7 @@ def test_gradient_check_simple():
         
         # Compute numerical gradient
         numerical_grad[i] = (f_plus - f_minus) / (2 * eps)
+        
     
     # Compare
     error = torch.max(torch.abs(analytical_grad - numerical_grad))

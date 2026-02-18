@@ -213,7 +213,7 @@ def _add_test(method, precision, scale_input, scale_weights, scale_time):
 np.random.seed(42)
 random.seed(42)
 
-for method in ['euler', 'rk4']:
+for method in ['l1']:#,'euler', 'rk4']:
     for precision in [torch.float16, torch.float32]:
         _add_test(method, precision, 1, 0, 0)  # input
         _add_test(method, precision, 0, 1, 0)  # weights

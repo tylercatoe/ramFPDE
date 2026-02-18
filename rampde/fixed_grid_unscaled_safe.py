@@ -14,6 +14,7 @@ import torch
 from torch.amp import autocast
 from .fixed_grid_base import FixedGridODESolverBase
 from .utils import _is_any_infinite
+from math import gamma
 
 # Import custom_fwd and custom_bwd from torch.cuda.amp
 try:
@@ -60,7 +61,7 @@ class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
             Returns inf gradients if overflow occurs
         """
         # Retrieve saved tensors and context
-        yt, *params = ctx.saved_tensors
+        zt, beta, *params = ctx.saved_tensors
         increment_func = ctx.increment_func
         ode_func = ctx.ode_func
         t = ctx.t
@@ -87,94 +88,103 @@ class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
         # Exception handling for overflow protection
         try:
             with torch.no_grad():
-                for i in reversed(range(N - 1)):
-                    dti = t[i + 1] - t[i]
+                for k in reversed(range(1, N)):
+                    dtk = t[k] - t[k - 1]
                     
+                    da = 0.0 
+
                     # Prepare current state - directly from saved tensor
-                    y = yt[i].detach().requires_grad_(True)
+                    z = zt[k].detach().requires_grad_(True)
                     
                     # Prepare time variables - no unnecessary cloning
-                    ti = t[i].detach()
-                    dti_local = dti.detach()
+                    tk = t[k].detach()
+                    dtk_local = dtk.detach()
                     if t.requires_grad:
-                        ti.requires_grad_(True)
-                        dti_local.requires_grad_(True)
-                    
+                        tk.requires_grad_(True)
+                        dtk_local.requires_grad_(True)
+
+                for j in range((N-k), N+1):
+                    b_jk1 = dtk_local ** beta / beta ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
+
                     # Rebuild computational graph
                     with torch.enable_grad():
-                        dy = increment_func(ode_func, y, ti, dti_local)
+                        dz = increment_func(ode_func, z, tk, dtk_local)
                     
                     # Simple overflow checking without scaling loop
-                    if _is_any_infinite((a,)):
-                        raise OverflowError(f"Overflow detected in gradients at time step i={i}")
+                    if _is_any_infinite((a, dz)):
+                        raise OverflowError(f"Overflow detected in gradients at time step i={k}")
                     
                     # Compute gradients - optimized for different cases
                     if t.requires_grad and any_param_requires_grad:
                         # Full gradient computation
                         grads = torch.autograd.grad(
-                            dy, (y, ti, dti_local, *params), a,
+                            dz, (z, tk, dtk_local, *params), a,
                             create_graph=False, allow_unused=True
                         )
-                        da, gti, gdti, *dparams = grads
+                        da, gtk, gdtk, *dparams = grads
                         
                         # Handle None gradients
-                        gti = gti.to(dtype_hi) if gti is not None else torch.zeros_like(ti)
-                        gdti = gdti.to(dtype_hi) if gdti is not None else torch.zeros_like(dti)
-                        gdti2 = torch.sum(a * dy, dim=-1)
+                        gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
+                        gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk)
+                        gdtk2 = torch.sum(a * dz, dim=-1)
                     elif t.requires_grad:
                         # Only time gradients needed
                         grads = torch.autograd.grad(
-                            dy, (y, ti, dti_local), a,
+                            dz, (z, tk, dtk_local), a,
                             create_graph=False, allow_unused=True
                         )
-                        da, gti, gdti = grads
+                        da, gtk, gdtk = grads
                         dparams = [torch.zeros_like(p) for p in params]
                         
                         # Handle None gradients
-                        gti = gti.to(dtype_hi) if gti is not None else torch.zeros_like(ti)
-                        gdti = gdti.to(dtype_hi) if gdti is not None else torch.zeros_like(dti)
-                        gdti2 = torch.sum(a * dy, dim=-1)
+                        gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
+                        gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk)
+                        gdtk2 = torch.sum(a * dz, dim=-1)
                     elif any_param_requires_grad:
                         # Only parameter gradients needed
                         grads = torch.autograd.grad(
-                            dy, (y, *params), a,
+                            dz, (z, *params), a,
                             create_graph=False, allow_unused=True
                         )
                         da, *dparams = grads
-                        gti = gdti = gdti2 = None
+                        gtk = gdtk = gdtk2 = None
                         
                         # Handle None gradients for parameters
                         dparams = [d if d is not None else torch.zeros_like(p) 
                                   for d, p in zip(dparams, params)]
                     else:
                         # Only adjoint gradient needed
-                        da = torch.autograd.grad(dy, y, a, create_graph=False)[0]
+                        da = torch.autograd.grad(dz, z, a, create_graph=False)[0]
                         dparams = [torch.zeros_like(p) for p in params]
-                        gti = gdti = gdti2 = None
+                        gtk = gdtk = gdtk2 = None
                     
-                    # Check for overflow in computed gradients
-                    if _is_any_infinite((da, gti, gdti, dparams)):
-                        raise OverflowError(f"Overflow detected in computed gradients at time step i={i}")
-                    
-                    # Update gradients - optimized with in-place operations
-                    # Convert da once and reuse
-                    da_hi = da.to(dtype_hi)
-                    a.add_(dti * da_hi).add_(at[i].to(dtype_hi))
-                    
-                    if any_param_requires_grad:
-                        # Use in-place operations for parameter gradient accumulation
-                        for g, d in zip(grad_theta, dparams):
-                            if d is not None:
-                                g.add_(dti * d.to(g.dtype))
-                    
-                    if grad_t is not None:
-                        gdti2_hi = gdti2.to(dtype_hi)
-                        grad_t[i].add_(dti * (gti - gdti)).sub_(gdti2_hi)
-                        grad_t[i + 1].add_(dti * gdti).add_(gdti2_hi)
-                    
-                    # Check for overflow in accumulated gradients
-                    if _is_any_infinite((a, grad_t, grad_theta)):
-                        raise OverflowError(f"Overflow detected in accumulated gradients at time step i={i}")
+                    da = da.to(dtype_hi) + b_jk1 * gdtk2.to(dtype_hi)
+
+                # Check for overflow in computed gradients
+                if _is_any_infinite((da, gtk, gdtk, dparams)):
+                    raise OverflowError(f"Overflow detected in computed gradients at time step i={i}")
+                
+
+
+                # Update gradients - optimized with in-place operations
+                # Convert da once and reuse
+                da_hi = da.to(dtype_hi)
+                a.add_(dtk * da_hi).add_(at[i].to(dtype_hi))
+                
+                if any_param_requires_grad:
+                    # Use in-place operations for parameter gradient accumulation
+                    for g, d in zip(grad_theta, dparams):
+                        if d is not None:
+                            g.add_(dti * d.to(g.dtype))
+                
+                if grad_t is not None:
+                    gdti2_hi = gdti2.to(dtype_hi)
+                    grad_t[i].add_(dti * (gti - gdti)).sub_(gdti2_hi)
+                    grad_t[i + 1].add_(dti * gdti).add_(gdti2_hi)
+                
+                # Check for overflow in accumulated gradients
+                if _is_any_infinite((a, grad_t, grad_theta)):
+                    raise OverflowError(f"Overflow detected in accumulated gradients at time step i={i}")
         
         except OverflowError:
             # Handle overflow by returning inf gradients

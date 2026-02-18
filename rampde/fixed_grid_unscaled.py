@@ -79,8 +79,8 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
         
         # Backward pass loop - no scaling, no exceptions
         with torch.no_grad():
-            for k in reversed(range(N - 1)):
-                dtk = t[k + 1] - t[k]
+            for k in reversed(range(1, N)):
+                dtk = t[k] - t[k - 1]
 
                 da = 0.0
                 
@@ -95,7 +95,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                     dtk_local.requires_grad_(True)
                 
                 for j in range((N-k), N+1):
-                    b_jk1 = dtk_local ** beta / beta ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
+                    b_jk1 = dtk_local ** beta / beta * ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
                     tj = t[j].detach()
                     dtj = t[j] - t[j-1]
                     dtj_local = dtj.detach()
