@@ -174,5 +174,5 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                         grad_t[k + 1].add_(dtk * gdtj).add_(gdtj2_hi)
         
         # Return gradients for all inputs to forward pass
-        # (increment_func, ode_func, y0, t, loss_scaler, *params)
-        return (None, None, a, grad_t, None, *grad_theta)
+        # (increment_func, ode_func, z0, beta, t, loss_scaler, *params)
+        return (None, None, a, None, grad_t, None, *grad_theta)

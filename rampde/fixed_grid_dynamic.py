@@ -271,7 +271,7 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
                         if d is not None:
                             g.add_(scale_factor * d.to(g.dtype))
                 
-                if grad_t is not None:
+                if grad_t is not None and gdtk2 is not None:
                     gdtk2_hi = gdtk2.to(dtype_hi) / scaler.S
                     grad_t[k].add_(scale_factor * (gtk - gdtk)).sub_(gdtk2_hi)
                     grad_t[k + 1].add_(scale_factor * gdtk).add_(gdtk2_hi)
@@ -317,5 +317,5 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
             param.data = old_params[name].data
         
         # Return gradients for all inputs to forward pass
-        # (increment_func, ode_func, y0, t, loss_scaler, *params)
-        return (None, None, a, grad_t, None, *grad_theta)
+        # (increment_func, ode_func, z0, beta, t, loss_scaler, *params)
+        return (None, None, a, None, grad_t, None, *grad_theta)
