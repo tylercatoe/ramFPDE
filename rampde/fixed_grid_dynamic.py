@@ -210,7 +210,7 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
                             # Handle None gradients
                             gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
                             gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk_local)
-                            gdtj2 = torch.sum(scaler.S * a * dz, dim=-1)
+                            gdtk2 = torch.sum(scaler.S * a * dz, dim=-1)
                         elif t.requires_grad:
                             # Only time gradients needed
                             grads = torch.autograd.grad(
