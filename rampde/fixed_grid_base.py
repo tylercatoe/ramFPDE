@@ -79,8 +79,8 @@ class FixedGridODESolverBase(torch.autograd.Function):
             gamma_beta = gamma(beta.item())
             
             # Forward integration loop
-            for k in range(1, N+1):
-                dt = t[k + 1] - t[k]
+            for k in range(1, N):
+                dt = t[k] - t[k - 1]
                 zp = z0
                 
                 # Compute Predictor/Corrector in low precision
@@ -109,7 +109,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
                     nu_kk = dt ** beta / (beta * (beta + 1))
                     z = z + (1/gamma_beta * nu_kk * dfP).to(dtype_hi)
 
-                zt[k + 1] = z.to(dtype_low)
+                zt[k] = z.to(dtype_low)
         
         # Save information for backward pass
         ctx.save_for_backward(zt, beta, *params)
