@@ -103,92 +103,88 @@ class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
                         tk.requires_grad_(True)
                         dtk_local.requires_grad_(True)
 
-                for j in range((N-k), N+1):
-                    b_jk1 = dtk_local ** beta / beta ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
+                    for j in range((N-k), N):
+                        b_jk1 = dtk_local ** beta / beta * ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
 
-                    # Rebuild computational graph
-                    with torch.enable_grad():
-                        dz = increment_func(ode_func, z, tk, dtk_local)
+                        # Rebuild computational graph
+                        with torch.enable_grad():
+                            dz = increment_func(ode_func, z, tk, dtk_local)
                     
-                    # Simple overflow checking without scaling loop
-                    if _is_any_infinite((a, dz)):
-                        raise OverflowError(f"Overflow detected in gradients at time step i={k}")
+                        # Simple overflow checking without scaling loop
+                        if _is_any_infinite((a, dz)):
+                            raise OverflowError(f"Overflow detected in gradients at time step i={k}")
                     
-                    # Compute gradients - optimized for different cases
-                    if t.requires_grad and any_param_requires_grad:
-                        # Full gradient computation
-                        grads = torch.autograd.grad(
-                            dz, (z, tk, dtk_local, *params), a,
-                            create_graph=False, allow_unused=True
-                        )
-                        da, gtk, gdtk, *dparams = grads
-                        
-                        # Handle None gradients
-                        gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
-                        gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk)
-                        gdtk2 = torch.sum(a * dz, dim=-1)
-                    elif t.requires_grad:
-                        # Only time gradients needed
-                        grads = torch.autograd.grad(
-                            dz, (z, tk, dtk_local), a,
-                            create_graph=False, allow_unused=True
-                        )
-                        da, gtk, gdtk = grads
-                        dparams = [torch.zeros_like(p) for p in params]
-                        
-                        # Handle None gradients
-                        gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
-                        gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk)
-                        gdtk2 = torch.sum(a * dz, dim=-1)
-                    elif any_param_requires_grad:
-                        # Only parameter gradients needed
-                        grads = torch.autograd.grad(
-                            dz, (z, *params), a,
-                            create_graph=False, allow_unused=True
-                        )
-                        da, *dparams = grads
-                        gtk = gdtk = gdtk2 = None
-                        
-                        # Handle None gradients for parameters
-                        dparams = [d if d is not None else torch.zeros_like(p) 
-                                  for d, p in zip(dparams, params)]
-                    else:
-                        # Only adjoint gradient needed
-                        da = torch.autograd.grad(dz, z, a, create_graph=False)[0]
-                        dparams = [torch.zeros_like(p) for p in params]
-                        gtk = gdtk = gdtk2 = None
+                        # Compute gradients - optimized for different cases
+                        if t.requires_grad and any_param_requires_grad:
+                            # Full gradient computation
+                            grads = torch.autograd.grad(
+                                dz, (z, tk, dtk_local, *params), a,
+                                create_graph=False, allow_unused=True
+                            )
+                            da, gtk, gdtk, *dparams = grads
+                            
+                            # Handle None gradients
+                            gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
+                            gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk)
+                            gdtk2 = torch.sum(a * dz, dim=-1)
+                        elif t.requires_grad:
+                            # Only time gradients needed
+                            grads = torch.autograd.grad(
+                                dz, (z, tk, dtk_local), a,
+                                create_graph=False, allow_unused=True
+                            )
+                            da, gtk, gdtk = grads
+                            dparams = [torch.zeros_like(p) for p in params]
+                            
+                            # Handle None gradients
+                            gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
+                            gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk)
+                            gdtk2 = torch.sum(a * dz, dim=-1)
+                        elif any_param_requires_grad:
+                            # Only parameter gradients needed
+                            grads = torch.autograd.grad(
+                                dz, (z, *params), a,
+                                create_graph=False, allow_unused=True
+                            )
+                            da, *dparams = grads
+                            gtk = gdtk = gdtk2 = None
+                            
+                            # Handle None gradients for parameters
+                            dparams = [d if d is not None else torch.zeros_like(p) 
+                                    for d, p in zip(dparams, params)]
+                        else:
+                            # Only adjoint gradient needed
+                            da = torch.autograd.grad(dz, z, a, create_graph=False)[0]
+                            dparams = [torch.zeros_like(p) for p in params]
+                            gtk = gdtk = gdtk2 = None
                     
-                    da = da.to(dtype_hi) + b_jk1 * gdtk2.to(dtype_hi)
+                            # Accumulate da with gdtk2 term only if not None
+                        if gdtk2 is not None:
+                            da = da.to(dtype_hi) + b_jk1 * gdtk2.to(dtype_hi)
 
-                # Check for overflow in computed gradients
-                if _is_any_infinite((da, gtk, gdtk, dparams)):
-                    raise OverflowError(f"Overflow detected in computed gradients at time step i={i}")
-                
-
-
-                # Update gradients - optimized with in-place operations
-                # Convert da once and reuse
-                da_hi = da.to(dtype_hi)
-                a.add_(dtk * da_hi).add_(at[i].to(dtype_hi))
-                
-                if any_param_requires_grad:
-                    # Use in-place operations for parameter gradient accumulation
-                    for g, d in zip(grad_theta, dparams):
-                        if d is not None:
-                            g.add_(dti * d.to(g.dtype))
-                
-                if grad_t is not None:
-                    gdti2_hi = gdti2.to(dtype_hi)
-                    grad_t[i].add_(dti * (gti - gdti)).sub_(gdti2_hi)
-                    grad_t[i + 1].add_(dti * gdti).add_(gdti2_hi)
-                
-                # Check for overflow in accumulated gradients
-                if _is_any_infinite((a, grad_t, grad_theta)):
-                    raise OverflowError(f"Overflow detected in accumulated gradients at time step i={i}")
-        
-        except OverflowError:
-            # Handle overflow by returning inf gradients
-            # This is compatible with PyTorch's GradScaler
+                    # Check for overflow in computed gradients (after j loop)
+                    if _is_any_infinite((da, gtk, gdtk, dparams)):
+                        raise OverflowError(f"Overflow detected in computed gradients at time step k={k}")
+                    
+                    # Update gradients - optimized with in-place operations
+                    # Convert da once and reuse
+                    da_hi = da.to(dtype_hi)
+                    a.add_(dtk * da_hi).add_(at[k].to(dtype_hi))
+                    
+                    if any_param_requires_grad:
+                        # Use in-place operations for parameter gradient accumulation
+                        for g, d in zip(grad_theta, dparams):
+                            if d is not None:
+                                g.add_(dtk * d.to(g.dtype))
+                    
+                    if grad_t is not None and gdtk2 is not None:
+                        gdtk2_hi = gdtk2.to(dtype_hi)
+                        grad_t[k].add_(dtk * (gtk - gdtk)).sub_(gdtk2_hi)
+                        grad_t[k + 1].add_(dtk * gdtk).add_(gdtk2_hi)
+                    
+                    # Check for overflow in accumulated gradients
+                    if _is_any_infinite((a, grad_t, grad_theta)):
+                        raise OverflowError(f"Overflow detected in accumulated gradients at time step k={k}")
             a_inf = torch.full_like(a, float('inf'))
             grad_theta_inf = [torch.full_like(grad, float('inf')) for grad in grad_theta]
             grad_t_inf = torch.full_like(t, float('inf')) if t.requires_grad else None

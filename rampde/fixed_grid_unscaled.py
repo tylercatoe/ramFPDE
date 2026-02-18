@@ -152,8 +152,9 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                         da = torch.autograd.grad(dz, z, a, create_graph=False)[0]
                         dparams = [torch.zeros_like(p) for p in params]
                         gtj = gdtj = gdtj2 = None
-                    
-                    da = da.to(dtype_hi) + b_jk1 * gdtj2.to(dtype_hi)
+                    # Accumulate da with gdtj2 term only if time gradients are tracked
+                    if gdtj2 is not None:
+                        da = da.to(dtype_hi) + b_jk1 * gdtj2.to(dtype_hi)
                     
                 # Update gradients - optimized with in-place operations
                 # Convert da once and reuse
@@ -166,62 +167,11 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                         if d is not None:
                             g.add_(dtk * d.to(g.dtype))
                 
-
-                    b_jk1 = dtk_local ** beta / beta * ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
-
-                    # Rebuild computational graph
-                    with torch.enable_grad():
-                        dz = increment_func(ode_func, z, tk, dtk_local)
-                
-                    # Compute gradients - optimized for different cases
-                    if t.requires_grad and any_param_requires_grad:
-                        # Full gradient computation
-                        grads = torch.autograd.grad(
-                            dz, (z, tk, dtk_local, *params), a,
-                            create_graph=False, allow_unused=True
-                        )
-                        da, gtk, gdtk, *dparams = grads
-                        
-                        # Handle None gradients
-                        gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
-                        gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk_local)
-                        gdtk2 = torch.sum(a * dz, dim=-1)
-                        
-                    elif t.requires_grad:
-                        # Only time gradients needed
-                        grads = torch.autograd.grad(
-                            dz, (z, tk, dtk_local), a,
-                            create_graph=False, allow_unused=True
-                        )
-                        da, gtk, gdtk = grads
-                        dparams = [torch.zeros_like(p) for p in params]
-                        
-                        # Handle None gradients
-                        gtk = gtk.to(dtype_hi) if gtk is not None else torch.zeros_like(tk)
-                        gdtk = gdtk.to(dtype_hi) if gdtk is not None else torch.zeros_like(dtk_local)
-                        gdtk2 = torch.sum(a * dz, dim=-1)
-                    elif any_param_requires_grad:
-                        # Only parameter gradients needed
-                        grads = torch.autograd.grad(
-                            dz, (z, *params), a,
-                            create_graph=False, allow_unused=True
-                        )
-                        da, *dparams = grads
-                        gtk = gdtk = gdtk2 = None
-                        
-                        # Handle None gradients for parameters
-                        dparams = [d if d is not None else torch.zeros_like(p) 
-                                for d, p in zip(dparams, params)]
-                    else:
-                        # Only adjoint gradient needed
-                        da = torch.autograd.grad(dz, z, a, create_graph=False)[0]
-                        dparams = [torch.zeros_like(p) for p in params]
-                        gtk = gdtk = gdtk2 = None
-                    
-                if grad_t is not None:
-                    gdtk2_hi = gdtk2.to(dtype_hi)
-                    grad_t[k].add_(dtk * (gtk - gdtk)).sub_(gdtk2_hi)
-                    grad_t[k + 1].add_(dtk * gdtk).add_(gdtk2_hi)
+                if grad_t is not None and gdtj2 is not None:
+                    gdtj2_hi = gdtj2.to(dtype_hi)
+                    grad_t[k].add_(dtk * (gtj - gdtj)).sub_(gdtj2_hi)
+                    if k + 1 < len(grad_t):
+                        grad_t[k + 1].add_(dtk * gdtj).add_(gdtj2_hi)
         
         # Return gradients for all inputs to forward pass
         # (increment_func, ode_func, y0, t, loss_scaler, *params)

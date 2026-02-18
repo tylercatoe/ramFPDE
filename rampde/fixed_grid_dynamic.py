@@ -104,7 +104,7 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
                     tk.requires_grad_(True)
                     dtk_local.requires_grad_(True)
 
-                for j in range((N-k), N+1):
+                for j in range((N-k), N):
                     b_jk1 = dtk_local ** beta / beta * ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
                     
                     tj = t[j].detach()
@@ -180,7 +180,9 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
                         else:
                             break
 
-                    da = da.to(dtype_hi) + b_jk1 * gdtj2.to(dtype_hi)
+                    # Accumulate da with gdtj2 term only if time gradients are tracked
+                    if gdtj2 is not None:
+                        da = da.to(dtype_hi) + b_jk1 * gdtj2.to(dtype_hi)
                     
                 # Now do all the scaling and graident calculations just for k:
                     # Dynamic scaling loop
