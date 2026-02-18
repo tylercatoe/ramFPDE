@@ -9,12 +9,14 @@ variants to handle different scaling and exception handling strategies.
 from typing import Any, Optional, Tuple, Union
 import torch
 from torch.amp import autocast
+from math import gamma
 
 # Import custom_fwd and custom_bwd from torch.cuda.amp
 try:
     from torch.amp import custom_fwd, custom_bwd
 except ImportError:
     from torch.cuda.amp import custom_fwd, custom_bwd
+
 
 
 class FixedGridODESolverBase(torch.autograd.Function):
@@ -36,7 +38,8 @@ class FixedGridODESolverBase(torch.autograd.Function):
         ctx: Any, 
         increment_func: torch.nn.Module, 
         ode_func: torch.nn.Module, 
-        y0: torch.Tensor, 
+        z0: torch.Tensor, 
+        beta: torch.Tensor, 
         t: torch.Tensor, 
         loss_scaler: Any, 
         *params: torch.Tensor
@@ -51,48 +54,72 @@ class FixedGridODESolverBase(torch.autograd.Function):
             ctx: PyTorch autograd context for saving information for backward pass
             increment_func: Increment function (Euler, RK4, etc.)
             ode_func: ODE function f(t, y)
-            y0: Initial condition tensor
+            z0: Initial condition tensor
+            beta: ODE order tensor in (0,1]
             t: Time points tensor
             loss_scaler: Loss scaler for mixed precision (DynamicScaler or NoScaler)
             *params: Parameters of the ODE function
             
         Returns:
-            yt: Solution tensor at all time points
+            zt: Solution tensor at all time points
         """
         with torch.no_grad():
             # Determine precision levels
-            dtype_hi = y0.dtype
+            dtype_hi = z0.dtype
             dtype_low = torch.get_autocast_dtype('cuda') if torch.is_autocast_enabled() else dtype_hi
             
             # Initialize solution storage
             N = t.shape[0]
-            y = y0
-            yt = torch.zeros(N, *y.shape, dtype=dtype_low, device=y.device)
-            yt[0] = y0.to(dtype_low)
+            z = z0
+            zt = torch.zeros(N, *z.shape, dtype=dtype_low, device=z.device)
+            df = torch.zeros(N, *z.shape, dtype=dtype_low, device=z.device)  # Store increments for reuse
+            zt[0] = z0.to(dtype_low)
+
+            # Caluclate Gamma(beta) once
+            gamma_beta = gamma(beta.item())
             
             # Forward integration loop
-            for i in range(N - 1):
-                dt = t[i + 1] - t[i]
+            for k in range(1, N+1):
+                dt = t[k + 1] - t[k]
+                zp = z0
                 
-                # Compute increment in low precision
+                # Compute Predictor/Corrector in low precision
                 with autocast(device_type='cuda', dtype=dtype_low):
-                    dy = increment_func(ode_func, y, t[i], dt)
-                
-                # Update solution in high precision, then convert to low precision
-                with autocast(device_type='cuda', enabled=False):
-                    y = y + dt * dy
-                
-                yt[i + 1] = y.to(dtype_low)
+
+                    # Compute Predictor
+                    for j in range(k-1):
+                        df_j = df[j] # Reuse previously computed increment
+                        mu_jk = dt ** beta / beta * ((k-j) ** beta - (k-j-1) ** beta)
+                        zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi) # Accumulate in high precision
+                        
+                    j = k - 1
+                    df_j = increment_func(ode_func, z, t[j], dt) # Compute new increment
+                    df[j] = df_j  # Store for reuse
+                    mu_jk = dt ** beta / beta * ((k-j) ** beta - (k-j-1) ** beta) / gamma_beta
+                    zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi) # Accumulate in high precision
+
+                    # Compute Corrector
+                    z = z0 
+                    dfP = increment_func(ode_func, zp, t[k], dt) # Predictor increment
+                    nu_00 = dt ** beta / (beta * (beta + 1)) * ((k-1) ** (beta + 1) - (k-1-beta) * k ** beta ) 
+                    z = z + (1/gamma_beta * nu_00 * df_j[0]).to(dtype_hi)
+                    for j in range(1, k):
+                        nu_jk = dt ** beta / (beta * (beta + 1)) * ((k-j+1)**(beta+1) + (k-j-1)**(beta+1) - 2*(k-j)**(beta+1))
+                        z = z + (1/gamma_beta * nu_jk * df[j]).to(dtype_hi)
+                    nu_kk = dt ** beta / (beta * (beta + 1))
+                    z = z + (1/gamma_beta * nu_kk * dfP).to(dtype_hi)
+
+                zt[k + 1] = z.to(dtype_low)
         
         # Save information for backward pass
-        ctx.save_for_backward(yt, *params)
+        ctx.save_for_backward(zt, beta, *params)
         ctx.increment_func = increment_func
         ctx.ode_func = ode_func
         ctx.t = t
         ctx.dtype_hi = dtype_hi
         ctx.loss_scaler = loss_scaler
         
-        return yt
+        return zt
     
     @staticmethod
     def backward(ctx: Any, at: torch.Tensor) -> Tuple[Optional[torch.Tensor], ...]:

@@ -9,6 +9,35 @@ from typing import Callable, Dict, Type
 import torch
 import torch.nn as nn
 
+class L1(nn.Module):
+  """
+  L1 predictor corrector increment: df_j
+
+  """
+  name = 'l1'
+
+  def forward(
+    self, 
+    func: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    z: torch.Tensor,
+    t: torch.Tensor,
+    dt: torch.Tensor
+  ) -> torch.Tensor:
+    """
+    Compute L1 Predictor Corrector increment.
+
+    Args: 
+      func: ODE function f(t,y)
+      z:    Previous solution value
+      t:    Current time
+      dt:   Time step (not used, but included for consistency)
+
+    Returns: 
+      dy: Increment dy = f(t,z)
+    """
+
+    return func(t,z)
+
 class Euler(nn.Module):
     """
     Euler increment function: dy = f(t, y)
@@ -86,6 +115,7 @@ class RK4(nn.Module):
 INCREMENTS: Dict[str, Type[nn.Module]] = {
     'euler': Euler,
     'rk4': RK4,
+    'l1': L1,
 }
 
 
@@ -94,7 +124,7 @@ def get_increment_function(method: str) -> Type[nn.Module]:
     Get increment function by name.
     
     Args:
-        method: String name of the method ('euler', 'rk4')
+        method: String name of the method ('l1, 'euler', 'rk4')
         
     Returns:
         Increment function class
