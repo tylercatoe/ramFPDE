@@ -112,6 +112,7 @@ def odeint(
     t: torch.Tensor, 
     *, 
     method: MethodType = 'rk4', 
+    beta: Optional[torch.Tensor] = None,
     atol: Optional[float] = None, 
     rtol: Optional[float] = None, 
     loss_scaler: ScalerType = None
@@ -127,7 +128,8 @@ def odeint(
         func: ODE function f(t, y)
         y0: Initial condition (tensor or tuple of tensors)
         t: Time points tensor
-        method: Integration method ('rk4' or 'euler')
+        method: Integration method ('rk4' or 'euler' or 'l1')
+        beta: ODE order in (0, 1] for fractional ODEs. If None, defaults to 1.0 (standard ODE)
         atol: Absolute tolerance (unused in fixed grid solvers)
         rtol: Relative tolerance (unused in fixed grid solvers)
         loss_scaler: Loss scaler for mixed precision (DynamicScaler, None, or False).
@@ -156,6 +158,12 @@ def odeint(
         func = _TupleFunc(func, shapes, numels)
         y0 = _tuple_to_tensor(y0)
     
+    # Set default beta value for standard ODEs if not provided
+    if beta is None:
+        beta = torch.tensor(1.0, device=y0.device, dtype=y0.dtype)
+    elif not isinstance(beta, torch.Tensor):
+        beta = torch.tensor(beta, device=y0.device, dtype=y0.dtype)
+    
     # Get increment function
     increment_func = get_increment_function(method)()
     
@@ -169,7 +177,7 @@ def odeint(
     params = func.parameters()
     
     # Solve the ODE using the selected solver
-    solution = solver_class.apply(increment_func, func, y0, t, loss_scaler, *params)
+    solution = solver_class.apply(increment_func, func, y0, beta, t, loss_scaler, *params)
     
     # Convert back to tuple if needed
     if y0_tuple:
