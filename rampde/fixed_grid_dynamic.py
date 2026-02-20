@@ -107,7 +107,7 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
                     tk.requires_grad_(True)
                     dtk_local.requires_grad_(True)
 
-                for j in range((N-k), (N+1)):
+                for j in range((N-k), (N)):
                     tj = t[j].detach()
                     dtj = t[j] - t[j-1]
                     dtj_local = dtj.detach()
