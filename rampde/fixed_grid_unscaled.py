@@ -77,9 +77,12 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
         # Fast path check - skip parameter gradients if not needed
         any_param_requires_grad = any(p.requires_grad for p in params) if params else False
         
+        # Calculate Gamma(beta) once
+        gamma_beta = gamma(beta.item())
+
         # Backward pass loop - no scaling, no exceptions
         with torch.no_grad():
-            for k in reversed(range(1, N)):
+            for k in reversed(range(N)):
                 dtk = t[k] - t[k - 1]
 
                 da = 0.0
@@ -94,11 +97,12 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                     tk.requires_grad_(True)
                     dtk_local.requires_grad_(True)
                 
-                for j in range((N-k-1), N):
-                    b_jk1 = dtk_local ** beta / beta * ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) 
+                for j in range((N-k), (N+1)):
+                    
                     tj = t[j].detach()
                     dtj = t[j] - t[j-1]
                     dtj_local = dtj.detach()
+                    b_jk1 = dtj_local ** beta / beta * ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) # should we use dt_k or dt_j?
 
                     if t.requires_grad:
                         tj.requires_grad_(True)
@@ -115,7 +119,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                             dz, (z, tj, dtj_local, *params), a,
                             create_graph=False, allow_unused=True
                         )
-                        da, gtj, gdtj, *dparams = grads
+                        da_j, gtj, gdtj, *dparams = grads
                         
                         # Handle None gradients
                         gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(tj)
@@ -128,7 +132,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                             dz, (z, tj, dtj_local), a,
                             create_graph=False, allow_unused=True
                         )
-                        da, gtj, gdtj = grads
+                        da_j, gtj, gdtj = grads
                         dparams = [torch.zeros_like(p) for p in params]
                         
                         # Handle None gradients
@@ -141,7 +145,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                             dz, (z, *params), a,
                             create_graph=False, allow_unused=True
                         )
-                        da, *dparams = grads
+                        da_j, *dparams = grads
                         gtj = gdtj = gdtj2 = None
                         
                         # Handle None gradients for parameters
@@ -149,24 +153,29 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                                 for d, p in zip(dparams, params)]
                     else:
                         # Only adjoint gradient needed
-                        da = torch.autograd.grad(dz, z, a, create_graph=False)[0]
+                        da_j = torch.autograd.grad(dz, z, a, create_graph=False)[0]
                         dparams = [torch.zeros_like(p) for p in params]
                         gtj = gdtj = gdtj2 = None
                     # Accumulate da with gdtj2 term only if time gradients are tracked
                     if gdtj2 is not None:
-                        da = da.to(dtype_hi) + b_jk1 * gdtj2.to(dtype_hi)
+                        da.add_(b_jk1 * da_j.to(dtype_hi))
                     
                 # Update gradients - optimized with in-place operations
                 # Convert da once and reuse
                 da_hi = da.to(dtype_hi)
-                a.add_(dtk * da_hi).add_(at[k].to(dtype_hi))
+                #a.add_(dtk * da_hi).add_(at[k].to(dtype_hi))
+                a.sub_(dtk / gamma_beta * da_hi)
                 
+
+                ######## What's happening here? ########
                 if any_param_requires_grad:
                     # Use in-place operations for parameter gradient accumulation
                     for g, d in zip(grad_theta, dparams):
                         if d is not None:
-                            g.add_(dtk * d.to(g.dtype))
+                            vjp = torch.sum(a * d, dim=-1)
+                            g.add_(dtk * vjp.to(g.dtype))
                 
+                # I dont understand what's happening here
                 if grad_t is not None and gdtj2 is not None:
                     gdtj2_hi = gdtj2.to(dtype_hi)
                     grad_t[k].add_(dtk * (gtj - gdtj)).sub_(gdtj2_hi)

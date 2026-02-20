@@ -70,44 +70,46 @@ class FixedGridODESolverBase(torch.autograd.Function):
             
             # Initialize solution storage
             N = t.shape[0]
-            z = z0
-            zt = torch.zeros(N, *z.shape, dtype=dtype_low, device=z.device)
-            df = torch.zeros(N, *z.shape, dtype=dtype_low, device=z.device)  # Store increments for reuse
+            zt = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
+            df = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
             zt[0] = z0.to(dtype_low)
 
-            # Caluclate Gamma(beta) once
+            # Calculate Gamma(beta) once
             gamma_beta = gamma(beta.item())
             
             # Forward integration loop
             for k in range(1, N):
                 dt = t[k] - t[k - 1]
-                zp = z0
                 
                 # Compute Predictor/Corrector in low precision
                 with autocast(device_type='cuda', dtype=dtype_low):
 
-                    # Compute Predictor
+                    # Predictor: sum over all history j=0 to k-1
+                    zp = z0
                     for j in range(k-1):
-                        df_j = df[j] # Reuse previously computed increment
+                        df_j = df[j]
                         mu_jk = dt ** beta / beta * ((k-j) ** beta - (k-j-1) ** beta)
-                        zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi) # Accumulate in high precision
-                        
+                        zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi)
                     j = k - 1
-                    df_j = increment_func(ode_func, z, t[j], dt) # Compute new increment
-                    df[j] = df_j  # Store for reuse
-                    mu_jk = dt ** beta / beta * ((k-j) ** beta - (k-j-1) ** beta) / gamma_beta
-                    zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi) # Accumulate in high precision
+                    df_j = increment_func(ode_func, zt[j], t[j], dt)
+                    mu_jk = dt ** beta / beta * ((k-j) ** beta - (k-j-1) ** beta)
+                    zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi)
+                    df[j] = df_j.to(dtype_low)
 
-                    # Compute Corrector
-                    z = z0 
-                    dfP = increment_func(ode_func, zp, t[k], dt) # Predictor increment
-                    nu_00 = dt ** beta / (beta * (beta + 1)) * ((k-1) ** (beta + 1) - (k-1-beta) * k ** beta ) 
-                    z = z + (1/gamma_beta * nu_00 * df_j[0]).to(dtype_hi)
-                    for j in range(1, k):
-                        nu_jk = dt ** beta / (beta * (beta + 1)) * ((k-j+1)**(beta+1) + (k-j-1)**(beta+1) - 2*(k-j)**(beta+1))
-                        z = z + (1/gamma_beta * nu_jk * df[j]).to(dtype_hi)
+                    # Corrector: sum over all history j=0 to k-1
+                    zc = z0
+                    for j in range(k):
+                        df_j = df[j]
+                        if j > 0:
+                            nu_jk = dt ** beta / (beta * (beta + 1)) * ((k-j+1)**(beta+1) + (k-j-1)**(beta+1) - 2*(k-j)**(beta+1))
+                        else:
+                            nu_jk = dt ** beta / (beta * (beta + 1)) * ((k-1) ** (beta+1) - (k-1-beta) * k ** beta)
+                        zc = zc + (1/gamma_beta * nu_jk * df_j).to(dtype_hi)
+
+                    # Add predictor term to get final approximation
+                    dfP = increment_func(ode_func, zp, t[k], dt)
                     nu_kk = dt ** beta / (beta * (beta + 1))
-                    z = z + (1/gamma_beta * nu_kk * dfP).to(dtype_hi)
+                    z = zc + (1/gamma_beta * nu_kk * dfP).to(dtype_hi)
 
                 zt[k] = z.to(dtype_low)
         
