@@ -97,7 +97,7 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
                 dtk = t[k] - t[k - 1]
                 
                 # Initalize adjoint gradient
-                da = 0.0
+                da = torch.tensor(0.0)
 
                 # Prepare current state and time variables - directly from saved tensor
                 z = zt[k].detach().requires_grad_(True)

@@ -85,7 +85,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
             for k in reversed(range(N)):
                 dtk = t[k] - t[k - 1]
 
-                da = 0.0
+                da = torch.tensor(0.0)
                 
                 # Prepare current state - directly from saved tensor
                 z = zt[k].detach().requires_grad_(True)
