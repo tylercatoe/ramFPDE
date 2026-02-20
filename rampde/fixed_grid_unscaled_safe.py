@@ -85,6 +85,8 @@ class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
         # Fast path check - skip parameter gradients if not needed
         any_param_requires_grad = any(p.requires_grad for p in params) if params else False
         
+        # Calculate Gamma(beta) once
+        gamma_beta = gamma(beta.item())
         # Exception handling for overflow protection
         try:
             with torch.no_grad():
@@ -166,7 +168,7 @@ class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
                     
                             # Accumulate da with gdtj2 term only if not None
                         if gdtj2 is not None:
-                            da.add_(b_jk1 * gdtj2.to(dtype_hi))
+                            da = da + (b_jk1 * gdtj2.to(dtype_hi))
 
 
                     # Check for overflow in computed gradients (after j loop)

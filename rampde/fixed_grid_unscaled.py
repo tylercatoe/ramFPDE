@@ -158,7 +158,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                         gtj = gdtj = gdtj2 = None
                     # Accumulate da with gdtj2 term only if time gradients are tracked
                     if gdtj2 is not None:
-                        da.add_(b_jk1 * da_j.to(dtype_hi))
+                        da = da + (b_jk1 * da_j.to(dtype_hi))
                     
                 # Update gradients - optimized with in-place operations
                 # Convert da once and reuse

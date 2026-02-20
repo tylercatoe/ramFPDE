@@ -184,7 +184,7 @@ class FixedGridODESolverDynamic(FixedGridODESolverBase):
 
                     # Accumulate da with gdtj2 term only if time gradients are tracked
                     if gdtj2 is not None:
-                        da.add_(b_jk1 * gdtj2.to(dtype_hi))
+                        da = da + (b_jk1 * gdtj2.to(dtype_hi))
                     
                 
                 # Update gradients with descaling - optimized with in-place operations
