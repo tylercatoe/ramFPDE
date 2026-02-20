@@ -160,7 +160,7 @@ def odeint(
     
     # Set default beta value for standard ODEs if not provided
     if beta is None:
-        beta = torch.tensor(1.0, device=y0.device, dtype=y0.dtype)
+        beta = torch.tensor(.5, device=y0.device, dtype=y0.dtype)
     elif not isinstance(beta, torch.Tensor):
         beta = torch.tensor(beta, device=y0.device, dtype=y0.dtype)
     
