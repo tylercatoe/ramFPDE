@@ -78,74 +78,72 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
         any_param_requires_grad = any(p.requires_grad for p in params) if params else False
         
         # Calculate Gamma(beta) once
-        gamma_beta = gamma(beta.item())
+        gamma_beta = gamma(beta)
+
+        # Initialize adjoint storage
+        at_history = torch.zeros_like(zt)
+        at_history[-1] = at[-1].to(dtype_hi) 
 
         # Backward pass loop - no scaling, no exceptions
         with torch.no_grad():
-            for k in reversed(range(N)):
-                dtk = t[k] - t[k - 1]
+            for k in range(N-1):
+                da = torch.zeros_like(a)
+                dtk = t[N-1-k] - t[N-2-k]
+                t_Ik = t[N-2-k]
+                
+                for j in range(k+1):
+                    # Prepare current state - directly from saved tensor
+                    a_ind = at_history[N-1-k+j]
+                    z_ind = zt[N-1-k+j].detach().requires_grad_(True) #####
 
-                da = torch.tensor(0.0)
-                
-                # Prepare current state - directly from saved tensor
-                z = zt[k].detach().requires_grad_(True)
-                
-                # Prepare time variables - no unnecessary cloning
-                tk = t[k].detach()
-                dtk_local = dtk.detach()
-                if t.requires_grad:
-                    tk.requires_grad_(True)
-                    dtk_local.requires_grad_(True)
-                
-                for j in range((N-k), (N)):
+                    t_ind = t[N-1-k+j].detach()
+                    dt_ind = t[N-1-k+j] - t[N-1-k+j-1]
+                    dt_ind_local = dt_ind.detach()
                     
-                    tj = t[j].detach()
-                    dtj = t[j] - t[j-1]
-                    dtj_local = dtj.detach()
-                    b_jk1 = dtj_local ** beta / beta * ((j - (N - k - 1)) ** beta - (j - (N - k))** beta) # should we use dt_k or dt_j?
+                    c_jk = ((t_Ik - t[N-2-k+j]) ** beta - (t_Ik - t_ind) ** beta) / beta
 
                     if t.requires_grad:
-                        tj.requires_grad_(True)
-                        dtj_local.requires_grad_(True)
+                        t_ind.requires_grad_(True)
+                        dt_ind_local.requires_grad_(True)
 
                     # Rebuild computational graph
                     with torch.enable_grad():
-                        dz = increment_func(ode_func, z, tj, dtj_local)
+                        dz = increment_func(ode_func, z_ind, t_ind, 0.0) 
                 
                     # Compute gradients - optimized for different cases
                     if t.requires_grad and any_param_requires_grad:
                         # Full gradient computation
                         grads = torch.autograd.grad(
-                            dz, (z, tj, dtj_local, *params), a,
+                            dz, (z_ind, t_ind, dt_ind_local, *params), a_ind,
                             create_graph=False, allow_unused=True
                         )
-                        da_j, gtj, gdtj, *dparams = grads
+                        da_ind, gtj, gdtj, *dparams = grads  
                         
                         # Handle None gradients
-                        gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(tj)
-                        gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dtj_local)
-                        gdtj2 = torch.sum(a * dz, dim=-1)
+                        gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(t_ind)
+                        gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dt_ind_local)
+                        gdtj2 = torch.sum(a_ind * dz, dim=-1)
                         
                     elif t.requires_grad:
                         # Only time gradients needed
                         grads = torch.autograd.grad(
-                            dz, (z, tj, dtj_local), a,
+                            dz, (z_ind, t_ind, dt_ind_local), a_ind,
                             create_graph=False, allow_unused=True
                         )
-                        da_j, gtj, gdtj = grads
+                        da_ind, gtj, gdtj = grads  
                         dparams = [torch.zeros_like(p) for p in params]
                         
                         # Handle None gradients
-                        gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(tj)
-                        gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dtj_local)
+                        gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(t_ind)
+                        gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dt_ind_local)
                         gdtj2 = torch.sum(a * dz, dim=-1)
                     elif any_param_requires_grad:
                         # Only parameter gradients needed
                         grads = torch.autograd.grad(
-                            dz, (z, *params), a,
+                            dz, (z_ind, *params), a_ind,
                             create_graph=False, allow_unused=True
                         )
-                        da_j, *dparams = grads
+                        da_ind, *dparams = grads  
                         gtj = gdtj = gdtj2 = None
                         
                         # Handle None gradients for parameters
@@ -153,18 +151,21 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                                 for d, p in zip(dparams, params)]
                     else:
                         # Only adjoint gradient needed
-                        da_j = torch.autograd.grad(dz, z, a, create_graph=False)[0]
+                        da_ind = torch.autograd.grad(dz, z_ind, a_ind, create_graph=False)[0]
                         dparams = [torch.zeros_like(p) for p in params]
                         gtj = gdtj = gdtj2 = None
-                    # Accumulate da with gdtj2 term only if time gradients are tracked
-                    if gdtj2 is not None:
-                        da = da + (b_jk1 * da_j.to(dtype_hi))
+                    
+                    
+                    da += c_jk * da_ind.to(dtype_hi)
+                
+                # Compute and store new adjoint
+                da_hi = da.to(dtype_hi)
+                at_history[N-2-k] = at_history[N-1] + (1 / gamma_beta) * da_hi
                     
                 # Update gradients - optimized with in-place operations
                 # Convert da once and reuse
-                da_hi = da.to(dtype_hi)
-                #a.add_(dtk * da_hi).add_(at[k].to(dtype_hi))
-                a.sub_(dtk / gamma_beta * da_hi)
+                #da_hi = da.to(dtype_hi)
+                #a = a - dtk / gamma_beta * da_hi 
                 
 
                 ######## What's happening here? ########
@@ -172,7 +173,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                     # Use in-place operations for parameter gradient accumulation
                     for g, d in zip(grad_theta, dparams):
                         if d is not None:
-                            vjp = torch.sum(a * d, dim=-1)
+                            vjp = torch.sum(at_history[N-2-k] * d, dim=-1)
                             g.add_(dtk * vjp.to(g.dtype))
                 
                 # I dont understand what's happening here
@@ -184,4 +185,4 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
         
         # Return gradients for all inputs to forward pass
         # (increment_func, ode_func, z0, beta, t, loss_scaler, *params)
-        return (None, None, a, None, grad_t, None, *grad_theta)
+        return (None, None, at_history[0], None, grad_t, None, *grad_theta)

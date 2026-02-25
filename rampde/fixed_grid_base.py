@@ -78,40 +78,41 @@ class FixedGridODESolverBase(torch.autograd.Function):
             gamma_beta = gamma(beta.item())
             
             # Forward integration loop
-            for k in range(1, N):
-                dt = t[k] - t[k - 1]
+            for k in range(0, N-1): 
                 
                 # Compute Predictor/Corrector in low precision
                 with autocast(device_type='cuda', dtype=dtype_low):
 
                     # Predictor: sum over all history j=0 to k-1
                     zp = z0
-                    for j in range(k-1):
+                    for j in range(k):
                         df_j = df[j]
-                        mu_jk = dt ** beta / beta * ((k-j) ** beta - (k-j-1) ** beta)
-                        zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi)
-                    j = k - 1
-                    df_j = increment_func(ode_func, zt[j], t[j], dt)
-                    mu_jk = dt ** beta / beta * ((k-j) ** beta - (k-j-1) ** beta)
-                    zp = zp + (1/gamma_beta * mu_jk * df_j).to(dtype_hi)
+                        b_jk1 = 1 / beta * ((t[k+1] - t[j]) ** beta - (t[k+1] - t[j+1]) ** beta)
+                        zp = zp + (1/gamma_beta * b_jk1 * df_j).to(dtype_hi)
+                    j = k
+                    df_j = increment_func(ode_func, zt[j], t[j], 0.0)
+                    b_jk1 = 1 / beta * ((t[k+1] - t[j]) ** beta - (t[k+1] - t[j+1]) ** beta)
+                    zp = zp + (1/gamma_beta * b_jk1 * df_j).to(dtype_hi)
                     df[j] = df_j.to(dtype_low)
 
                     # Corrector: sum over all history j=0 to k-1
                     zc = z0
-                    for j in range(k):
+                    j = 0
+                    a_jk1  = ((t[k+1] - t[j]) ** (beta + 1) + t[k+1] ** beta * ((beta + 1) * t[1] - t[k+1]) ) / (t[1] * beta * (beta + 1)) 
+                    df_j = df[j]
+                    zc = zc + (1/gamma_beta * a_jk1 * df_j).to(dtype_hi)
+
+                    for j in range(1, k):
                         df_j = df[j]
-                        if j > 0:
-                            nu_jk = dt ** beta / (beta * (beta + 1)) * ((k-j+1)**(beta+1) + (k-j-1)**(beta+1) - 2*(k-j)**(beta+1))
-                        else:
-                            nu_jk = dt ** beta / (beta * (beta + 1)) * ((k-1) ** (beta+1) - (k-1-beta) * k ** beta)
-                        zc = zc + (1/gamma_beta * nu_jk * df_j).to(dtype_hi)
+                        a_jk1 = ((t[k+1] - t[j-1]) ** (beta + 1) + (t[k+1] - t[j]) ** beta * (beta * (t[j-1] - t[j]) + t[j-1] - t[k+1])) / ((t[j] - t[j-1]) * beta * (beta + 1)) + ((t[k+1] - t[j+1]) ** (beta + 1) - (t[k+1] - t[j]) ** beta * (beta * (t[j] - t[j+1]) - t[j+1] + t[k+1])) / ((t[j+1] - t[j]) * beta * (beta + 1)) 
+                        zc = zc + (1/gamma_beta * a_jk1 * df_j).to(dtype_hi)
+                    
+                    j = k
+                    a_k1k1 = (t[k+1] - t[k]) ** beta / (beta * (beta + 1))
+                    dfP = increment_func(ode_func, zp, t[k+1], 0.0)
+                    zk1 = zc + (1/gamma_beta * a_k1k1 * dfP).to(dtype_hi)
 
-                    # Add predictor term to get final approximation
-                    dfP = increment_func(ode_func, zp, t[k], dt)
-                    nu_kk = dt ** beta / (beta * (beta + 1))
-                    z = zc + (1/gamma_beta * nu_kk * dfP).to(dtype_hi)
-
-                zt[k] = z.to(dtype_low)
+                zt[k+1] = zk1.to(dtype_low)
         
         # Save information for backward pass
         ctx.save_for_backward(zt, beta, *params)

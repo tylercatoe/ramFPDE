@@ -47,7 +47,7 @@ class TestTaylorExpansionODE(unittest.TestCase):
 
         self.device = torch.device("cuda:0")
         self.dim = 2         # small state dimension
-        self.n_time = 10     # few time steps to keep the integration fast
+        self.n_time = 50     # few time steps to keep the integration fast
         self.t0 = 0.0
         self.t1 = 10.0       # Longer interval works for all precisions and gives better gradients
 
