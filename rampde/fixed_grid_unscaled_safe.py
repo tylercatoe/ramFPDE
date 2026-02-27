@@ -187,39 +187,39 @@ class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
                                 #vjp = torch.sum(at_history[N-2-k] * d, dim=-1)
                                 g.add_(dtk * d.to(g.dtype))
                     
-                    # Compute time gradients for the current k step
+                    # Compute time gradients for the current backward step (index N-2-k)
                     if t.requires_grad:
-                        # Rebuild dz with correct inputs for gradient computation
-                        j = k
-                        z_j = zt[j].detach().requires_grad_(True)
-                        t_j = t[j].detach().requires_grad_(True)
-                        dt = t[j+1] - t[j]
-                        dt_local = dt.detach().requires_grad_(True)
+                        # Use backward indexing consistent with the rest of the algorithm
+                        idx = N - 2 - k
+                        z_idx = zt[idx].detach().requires_grad_(True)
+                        t_idx = t[idx].detach().requires_grad_(True)
+                        dt_local = dtk.detach().requires_grad_(True)
                         
-                        # Rebuild computational graph for dz at step j
+                        # Rebuild computational graph for dz at backward step idx
                         with torch.enable_grad():
-                            dz_j = increment_func(ode_func, z_j, t_j, 0.0)
+                            dz_idx = increment_func(ode_func, z_idx, t_idx, 0.0)
                         
-                        # Compute gradients
+                        # Compute gradients using the adjoint we just computed
                         grads = torch.autograd.grad(
-                            dz_j, (z_j, t_j, dt_local), dtk * at_history[j],
+                            dz_idx, (z_idx, t_idx, dt_local), dtk * at_history[idx],
                             create_graph=False, allow_unused=True
                         )
                         da_ind, gtj, gdtj = grads
                         
                         # Handle None gradients
-                        gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(t[j])
+                        gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(t_idx)
                         gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dt_local)
-                        gdtj2 = torch.sum(dtk * at_history[j] * dz_j, dim=-1)
+                        gdtj2 = torch.sum(dtk * at_history[idx] * dz_idx, dim=-1)
                     else:
                         gtj = gdtj = gdtj2 = None
 
-                    # Update time gradients
+                    # Update time gradients at the backward position idx = N-2-k
                     if grad_t is not None and gdtj2 is not None:
+                        idx = N - 2 - k
                         gdtj2_hi = gdtj2.to(dtype_hi)
-                        grad_t[k].add_(dtk * (gtj - gdtj)).sub_(gdtj2_hi)
-                        if k + 1 < len(grad_t):
-                            grad_t[k + 1].add_(dtk * gdtj).add_(gdtj2_hi)
+                        grad_t[idx].add_(dtk * (gtj - gdtj)).sub_(gdtj2_hi)
+                        if idx + 1 < len(grad_t):
+                            grad_t[idx + 1].add_(dtk * gdtj).add_(gdtj2_hi)
 
                     # Check for overflow in computed gradients (after j loop)
                     if _is_any_infinite((da, gtj, gdtj, dparams)):
