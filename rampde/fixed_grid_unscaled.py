@@ -176,24 +176,34 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                             vjp = torch.sum(at_history[N-2-k] * d, dim=-1)
                             g.add_(dtk * vjp.to(g.dtype))
                 
-                j = k
+                # Compute time gradients for the current k step
                 if t.requires_grad:
-                    # Only time gradients needed
+                    # Rebuild dz with correct inputs for gradient computation
+                    j = k
+                    z_j = zt[j].detach().requires_grad_(True)
+                    t_j = t[j].detach().requires_grad_(True)
                     dt = t[j+1] - t[j]
                     dt_local = dt.detach().requires_grad_(True)
+                    
+                    # Rebuild computational graph for dz at step j
+                    with torch.enable_grad():
+                        dz_j = increment_func(ode_func, z_j, t_j, 0.0)
+                    
+                    # Compute gradients
                     grads = torch.autograd.grad(
-                        dz, (zt[j], t[j], dt_local), dtk * at_history[j],
+                        dz_j, (z_j, t_j, dt_local), dtk * at_history[j],
                         create_graph=False, allow_unused=True
                     )
                     da_ind, gtj, gdtj = grads
-                    dparams = [torch.zeros_like(p) for p in params]
                     
                     # Handle None gradients
                     gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(t[j])
                     gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dt_local)
-                    gdtj2 = torch.sum(dtk * at_history[j] * dz, dim=-1)
+                    gdtj2 = torch.sum(dtk * at_history[j] * dz_j, dim=-1)
+                else:
+                    gtj = gdtj = gdtj2 = None
                     
-                # I dont understand what's happening here
+                # Update time gradients
                 if grad_t is not None and gdtj2 is not None:
                     gdtj2_hi = gdtj2.to(dtype_hi)
                     grad_t[k].add_(dtk * (gtj - gdtj)).sub_(gdtj2_hi)
