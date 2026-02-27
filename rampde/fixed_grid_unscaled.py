@@ -176,6 +176,23 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                             vjp = torch.sum(at_history[N-2-k] * d, dim=-1)
                             g.add_(dtk * vjp.to(g.dtype))
                 
+                j = k
+                if t.requires_grad:
+                    # Only time gradients needed
+                    dt = t[j+1] - t[j]
+                    dt_local = dt.detach().requires_grad_(True)
+                    grads = torch.autograd.grad(
+                        dz, (zt[j], t[j], dt_local), dtk * at_history[j],
+                        create_graph=False, allow_unused=True
+                    )
+                    da_ind, gtj, gdtj = grads
+                    dparams = [torch.zeros_like(p) for p in params]
+                    
+                    # Handle None gradients
+                    gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(t[j])
+                    gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dt_local)
+                    gdtj2 = torch.sum(dtk * at_history[j] * dz, dim=-1)
+                    
                 # I dont understand what's happening here
                 if grad_t is not None and gdtj2 is not None:
                     gdtj2_hi = gdtj2.to(dtype_hi)
