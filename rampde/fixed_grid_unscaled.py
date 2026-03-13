@@ -136,7 +136,7 @@ class FixedGridODESolverUnscaled(FixedGridODESolverBase):
                         # Handle None gradients
                         gtj = gtj.to(dtype_hi) if gtj is not None else torch.zeros_like(t_ind)
                         gdtj = gdtj.to(dtype_hi) if gdtj is not None else torch.zeros_like(dt_ind_local)
-                        gdtj2 = torch.sum(a * dz, dim=-1)
+                        gdtj2 = torch.sum(a_ind * dz, dim=-1)
                     elif any_param_requires_grad:
                         # Only parameter gradients needed
                         grads = torch.autograd.grad(
