@@ -97,7 +97,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
                     
                     # j = 0 term
                     f_func_j = f_func[0]
-                    eta_0_k1 = h ** beta / (beta * (beta + 1)) * ( (k) ** (beta+1) - (k-beta)**beta * (k+1)**beta)
+                    eta_0_k1 = h ** beta / (beta * (beta + 1)) * ( (k) ** (beta+1) - (k-beta) * (k+1)**beta)
                     zk1 = (eta_0_k1 * f_func_j).to(dtype_hi)
 
                     for j in range(1,k+1):
