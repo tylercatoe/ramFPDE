@@ -1,5 +1,5 @@
 """
-Base class for fixed grid ODE solvers.
+Base class for fixed grid ODE solvers. ((CURRENTLY WRITTEN FOR UNIFORM TIME GRID ONLY))
 
 This module provides the shared forward pass implementation that is identical
 across all fixed grid solver variants. Only the backward pass differs between
@@ -72,47 +72,46 @@ class FixedGridODESolverBase(torch.autograd.Function):
             N = t.shape[0]
             zt = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
             df = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
+            f_func = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
             zt[0] = z0.to(dtype_low)
+            h = t[1] - t[0]  # Assuming uniform time grid
 
             # Calculate Gamma(beta) once
             gamma_beta = gamma(beta.item())
             
             # Forward integration loop
             for k in range(0, N-1): 
-                
+                zp = 0.0 # Initialize current predictor increment
+
                 # Compute Predictor/Corrector in low precision
                 with autocast(device_type='cuda', dtype=dtype_low):
-
-                    # Predictor: sum over all history j=0 to k-1
-                    zp = z0
                     for j in range(k):
-                        df_j = df[j]
-                        b_jk1 = 1 / beta * ((t[k+1] - t[j]) ** beta - (t[k+1] - t[j+1]) ** beta)
-                        zp = zp + (1/gamma_beta * b_jk1 * df_j).to(dtype_hi)
-                    j = k
-                    df_j = increment_func(ode_func, zt[j], t[j], 0.0)
-                    b_jk1 = 1 / beta * ((t[k+1] - t[j]) ** beta - (t[k+1] - t[j+1]) ** beta)
-                    zp = zp + (1/gamma_beta * b_jk1 * df_j).to(dtype_hi)
-                    df[j] = df_j.to(dtype_low)
+                        f_func_j = f_func[j]
+                        mu_j_k1  = h ** beta / beta * ((k+1 - j) ** beta - (k - j) ** beta )
+                        zp = zp + (mu_j_k1 * f_func_j).to(dtype_hi)
+                    f_func_k = increment_func(ode_func, zt[k], t[k], 0.0)
+                    f_func[k] = f_func_k.to(dtype_low)
+                    mu_k_k1 = h ** beta / beta 
+                    zp = zt[0] + 1/gamma_beta * (zp + (mu_k_k1 * f_func[k]).to(dtype_hi))
 
-                    # Corrector: sum over all history j=0 to k-1
-                    zc = z0
-                    j = 0
-                    a_jk1  = ((t[k+1] - t[j]) ** (beta + 1) + t[k+1] ** beta * ((beta + 1) * t[1] - t[k+1]) ) / (t[1] * beta * (beta + 1)) 
-                    df_j = df[j]
-                    zc = zc + (1/gamma_beta * a_jk1 * df_j).to(dtype_hi)
-
-                    for j in range(1, k):
-                        df_j = df[j]
-                        a_jk1 = ((t[k+1] - t[j-1]) ** (beta + 1) + (t[k+1] - t[j]) ** beta * (beta * (t[j-1] - t[j]) + t[j-1] - t[k+1])) / ((t[j] - t[j-1]) * beta * (beta + 1)) + ((t[k+1] - t[j+1]) ** (beta + 1) - (t[k+1] - t[j]) ** beta * (beta * (t[j] - t[j+1]) - t[j+1] + t[k+1])) / ((t[j+1] - t[j]) * beta * (beta + 1)) 
-                        zc = zc + (1/gamma_beta * a_jk1 * df_j).to(dtype_hi)
                     
-                    j = k
-                    a_k1k1 = (t[k+1] - t[k]) ** beta / (beta * (beta + 1))
-                    dfP = increment_func(ode_func, zp, t[k+1], 0.0)
-                    zk1 = zc + (1/gamma_beta * a_k1k1 * dfP).to(dtype_hi)
+                    # j = 0 term
+                    f_func_j = f_func[0]
+                    eta_0_k1 = h ** beta / (beta * (beta + 1)) * ( (k) ** (beta+1) - (k-beta)**beta * (k+1)**beta)
+                    zk1 = (eta_0_k1 * f_func_j).to(dtype_hi)
 
+                    for j in range(1,k+1):
+                        f_func_j = f_func[j]
+                        eta_j_k1 = h ** beta / (beta * (beta + 1)) * ( (k-j+2) ** (beta + 1) + (k-j) ** (beta + 1) - 2 * (k-j+1) ** (beta+1))
+                        zk1 = zk1 + (eta_j_k1 * f_func_j).to(dtype_hi)
+                    
+                    # j = k+1 term
+                    f_func_j = increment_func(ode_func, zp, t[k+1], 0.0)
+                    eta_k1_k1 = h ** beta / (beta * (beta + 1))
+                    zk1 = zt[0] + 1/gamma_beta * (zk1 + (eta_k1_k1 * f_func_j).to(dtype_hi))
+                    
                 zt[k+1] = zk1.to(dtype_low)
+
         
         # Save information for backward pass
         ctx.save_for_backward(zt, beta, *params)

@@ -71,7 +71,6 @@ class FixedGridODESolverBase(torch.autograd.Function):
             # Initialize solution storage
             N = t.shape[0]
             zt = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
-            df = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
             f_func = torch.zeros(N, *z0.shape, dtype=dtype_low, device=z0.device)
             zt[0] = z0.to(dtype_low)
 
@@ -95,7 +94,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
                     mu_k_k1 = h ** beta / beta 
                     zk1 = zt[0] + (1/gamma_beta * (zk1 + (mu_k_k1 * f_func_k))).to(dtype_hi)
 
-                    zt[k+1] = zk1.to(dtype_low)
+                zt[k+1] = zk1.to(dtype_low)
                     
         
         # Save information for backward pass
