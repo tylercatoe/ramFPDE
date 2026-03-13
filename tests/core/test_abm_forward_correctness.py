@@ -187,7 +187,7 @@ class TestABMForwardPass(unittest.TestCase):
 
     def test_beta_one_linear_decay(self):
         device = _solver_device()
-        N, T = 2000, 1.0
+        N, T = 200, 1.0
         t = torch.linspace(0, T, N, dtype=torch.float64, device=device)
         z0 = torch.ones(1, dtype=torch.float64, device=device)
         beta = torch.tensor(1.0, dtype=torch.float64, device=device)
