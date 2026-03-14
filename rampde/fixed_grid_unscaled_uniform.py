@@ -110,13 +110,17 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                         )
                         da_ind, *dparams = grads
 
-                        # Handle None gradients for parameters
+                        # Handle None gradients (unused inputs)
+                        if da_ind is None:
+                            da_ind = torch.zeros_like(z_ind)
                         dparams = [d if d is not None else torch.zeros_like(p) 
                                 for d, p in zip(dparams, params)]
                         
                     else:
                         # only adjoint gradient needed
-                        da_ind = torch.autograd.grad(dz, z_ind, a_ind, create_graph=False)[0]
+                        da_ind = torch.autograd.grad(dz, z_ind, a_ind, create_graph=False, allow_unused=True)[0]
+                        if da_ind is None:
+                            da_ind = torch.zeros_like(z_ind)
                         dparams = [torch.zeros_like(p) for p in params]
                     
                     da += nu_jk1 * da_ind.to(dtype_hi)
