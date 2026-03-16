@@ -125,13 +125,36 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                     
                     da += nu_jk1 * da_ind.to(dtype_hi)
 
-                    if any_param_requires_grad:
-                        for i, d in enumerate(dparams):
-                            if d is not None:
-                                grad_theta[i].add_((-1) * h * d.to(grad_theta[i].dtype))
-
                 da = a + 1 / gamma_beta * da
                 at_history[k-1] = da.to(dtype_hi)
+
+
+                if any_param_requires_grad:
+                        z_k = zt[k].detach().requires_grad_(True)
+                        z_km1 = zt[k-1].detach().requires_grad_(True)
+
+                        with torch.enable_grad():
+                            dfk = increment_func(ode_func, z_k, k * h, 0.0)
+                        grads = torch.autograd.grad(
+                            dfk, params, at_history[k],
+                            create_graph=False, allow_unused=True
+                        )
+                        dparams_k = [d if d is not None else torch.zeros_like(p)
+                                     for d, p in zip(grads, params)]
+
+                        with torch.enable_grad():
+                            dfk1 = increment_func(ode_func, z_km1, (k - 1) * h, 0.0)
+                        grads = torch.autograd.grad(
+                            dfk1, params, at_history[k-1],
+                            create_graph=False, allow_unused=True
+                        )
+                        dparams_km1 = [d if d is not None else torch.zeros_like(p)
+                                       for d, p in zip(grads, params)]
+                        
+                        for i, (d_k, d_km1) in enumerate(zip(dparams_k, dparams_km1)):
+                            trap_update = 0.5 * h * (d_k.to(dtype_hi) + d_km1.to(dtype_hi))
+                            grad_theta[i].sub_(trap_update.to(grad_theta[i].dtype))
+
 
 
                 # if any_param_requires_grad:
