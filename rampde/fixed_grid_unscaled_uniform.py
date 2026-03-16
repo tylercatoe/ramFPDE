@@ -125,16 +125,21 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                     
                     da += nu_jk1 * da_ind.to(dtype_hi)
 
+                    if any_param_requires_grad:
+                        for i, d in enumerate(dparams):
+                            if d is not None:
+                                grad_theta[i].add_((-1) * h * d.to(grad_theta[i].dtype))
+
                 da = a + 1 / gamma_beta * da
                 at_history[k-1] = da.to(dtype_hi)
 
 
-                if any_param_requires_grad:
-                    for g, d in zip(grad_theta, dparams):
-                        da_hi = da.to(dtype_hi)
-                        if d is not None:
-                            vjp = torch.sum(da_hi * d, dim=-1)
-                            g.add_((-1) * h * vjp.to(g.dtype))
+                # if any_param_requires_grad:
+                #     for g, d in zip(grad_theta, dparams):
+                #         da_hi = da.to(dtype_hi)
+                #         if d is not None:
+                #             vjp = torch.sum(da_hi * d, dim=-1)
+                #             g.add_((-1) * h * vjp.to(g.dtype))
         
         # Return gradients for all inputs to forward pass
         # (increment_func, ode_func, z0, beta, t, loss_scaler, *params)
