@@ -92,20 +92,20 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                 
                 for j in range(k-1, N-1):
                     # Prepare current state - directly from saved tensor
-                    a_ind = at_history[j]
-                    z_ind = zt[j].detach().requires_grad_(True) #####
+                    a_ind = at_history[j+1]
+                    z_ind = zt[j+1].detach().requires_grad_(True) #####
                     tj = j*h
                     
                     nu_jk1 = h ** beta / beta * ((j + 2 - k) ** beta - (j - k + 1) ** beta)
 
                     # Rebuild computational graph
                     with torch.enable_grad():
-                        dz = increment_func(ode_func, z_ind, tj, 0.0)
+                        df = increment_func(ode_func, z_ind, tj, 0.0)
                     
                     # Compute gradients using the adjoint
                     if any_param_requires_grad:
                         grads = torch.autograd.grad(
-                            dz, (z_ind, *params), a_ind,
+                            df, (z_ind, *params), a_ind,
                             create_graph=False, allow_unused=True
                         )
                         da_ind, *dparams = grads
@@ -118,7 +118,7 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                         
                     else:
                         # only adjoint gradient needed
-                        da_ind = torch.autograd.grad(dz, z_ind, a_ind, create_graph=False, allow_unused=True)[0]
+                        da_ind = torch.autograd.grad(df, z_ind, a_ind, create_graph=False, allow_unused=True)[0]
                         if da_ind is None:
                             da_ind = torch.zeros_like(z_ind)
                         dparams = [torch.zeros_like(p) for p in params]
