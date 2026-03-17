@@ -74,11 +74,9 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
     @staticmethod
     def _terminal_convention_expectations(
-        z_terminal: torch.Tensor,
-        loss: torch.Tensor,
+        terminal_grad: float,
         t: torch.Tensor,
     ) -> tuple[float, float]:
-        terminal_grad = torch.autograd.grad(loss, z_terminal, retain_graph=True)[0].item()
         total_time = (t[-1] - t[0]).item()
         return terminal_grad, -total_time * terminal_grad
 
@@ -120,7 +118,7 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
         zt = _run_solver(func, z0, t, beta)
         loss = zt[-1, 0]
-        expected_grad_z0, expected_grad_theta = self._terminal_convention_expectations(zt[-1, 0], loss, t)
+        expected_grad_z0, expected_grad_theta = self._terminal_convention_expectations(1.0, t)
         loss.backward()
 
         grad_z0 = z0.grad.item()
@@ -147,7 +145,7 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
         zt = _run_solver(func, z0, t, beta)
         loss = 0.5 * zt[-1, 0] ** 2
-        _, expected_grad_theta = self._terminal_convention_expectations(zt[-1, 0], loss, t)
+        _, expected_grad_theta = self._terminal_convention_expectations(zt[-1, 0].item(), t)
         loss.backward()
 
         grad_theta = func.theta.grad.item()
@@ -169,7 +167,7 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
         zt = _run_solver(func, z0, t, beta)
         loss = 0.5 * zt[-1, 0] ** 2
-        _, expected_grad = self._terminal_convention_expectations(zt[-1, 0], loss, t)
+        _, expected_grad = self._terminal_convention_expectations(zt[-1, 0].item(), t)
         loss.backward()
         grad_auto = func.theta.grad.item()
 
@@ -190,7 +188,8 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
         zt = _run_solver(func, z0, t, beta)
         loss = (zt[-1, 0] ** 3) / 3.0
-        expected_grad_z0, expected_grad_theta = self._terminal_convention_expectations(zt[-1, 0], loss, t)
+        terminal_grad = zt[-1, 0].item() ** 2
+        expected_grad_z0, expected_grad_theta = self._terminal_convention_expectations(terminal_grad, t)
         loss.backward()
 
         self.assertAlmostEqual(z0.grad.item(), expected_grad_z0, places=7)
