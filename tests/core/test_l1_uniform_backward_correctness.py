@@ -1,15 +1,20 @@
 """
-Backward-pass correctness tests for the uniform-grid L1 solver.
+Regression tests for the uniform-grid L1 custom backward.
 
-This test suite targets rampde/fixed_grid_unscaled_uniform.py directly and
-checks that gradients from the custom backward follow the implementation's
-current sensitivity convention.
+This suite targets rampde/fixed_grid_unscaled_uniform.py directly and checks
+that gradients from the custom backward follow the solver's intended discrete
+sensitivity convention.
 
-We test the forward Caputo IVP
+These tests are intentionally not forward-map derivative checks. For the
+uniform L1 path, parameter gradients are treated as a discrete adjoint-style
+sensitivity quantity rather than the exact derivative of the implemented
+forward map.
+
+We use the manufactured Caputo IVP
 
     _0^C D_t^beta z(t) = f(t, z(t); theta),    z(0) = 0,
 
-with manufactured forcing
+with constant forcing
 
     f(t, z; theta) = theta.
 
@@ -17,15 +22,16 @@ Forward still matches the known closed form
 
     z(t) = theta * t^beta / Gamma(beta + 1).
 
-For backward, the implementation uses a standard first-order-in-time
-parameter sensitivity accumulation (with backward-time sign), so for this
-manufactured case and T=1:
+Because f is independent of z, the uniform backward's terminal adjoint is
+constant across the reverse sweep for terminal-only losses. Under the current
+discrete sensitivity convention on a uniform grid of length T,
 
-    L = z(T)            => dL/dtheta = -T
-    L = 0.5 * z(T)^2    => dL/dtheta = -T * z(T)
+    dL/dz0     = dL/dz(T)
+    dL/dtheta  = -T * dL/dz(T)
+
+for any scalar loss L that depends only on z(T).
 """
 
-import math
 import os
 import sys
 import unittest
@@ -52,8 +58,7 @@ class ConstantParamForcing(nn.Module):
 
 
 def _solver_device() -> torch.device:
-    # Keep auto selection; tests run in float64 regardless of device.
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device("cuda")
 
 
 def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.Tensor) -> torch.Tensor:
@@ -67,6 +72,17 @@ def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.
 
 class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
+    @staticmethod
+    def _terminal_convention_expectations(
+        z_terminal: torch.Tensor,
+        loss: torch.Tensor,
+        t: torch.Tensor,
+    ) -> tuple[float, float]:
+        terminal_grad = torch.autograd.grad(loss, z_terminal, retain_graph=True)[0].item()
+        total_time = (t[-1] - t[0]).item()
+        return terminal_grad, -total_time * terminal_grad
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 backward tests")
     def test_forward_closed_form_constant_forcing(self):
         """Forward solution matches z(t)=theta*t^beta/Gamma(beta+1)."""
         device = _solver_device()
@@ -85,11 +101,12 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
         max_err = (zt - exact).abs().max().item()
         self.assertLess(max_err, 1e-8, f"Forward closed-form mismatch: max_err={max_err:.3e}")
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 backward tests")
     def test_backward_exact_terminal_loss_gradients(self):
         """
-        With L = z(T), check exact gradients:
-          dL/dz0 = 1,
-                    dL/dtheta = -T under the current parameter-sensitivity convention.
+        With L = z(T), check the current discrete terminal sensitivity rule:
+          dL/dz0 = dL/dz(T) = 1,
+          dL/dtheta = -T * dL/dz(T).
         """
         device = _solver_device()
         theta0 = 2.3
@@ -103,22 +120,20 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
         zt = _run_solver(func, z0, t, beta)
         loss = zt[-1, 0]
+        expected_grad_z0, expected_grad_theta = self._terminal_convention_expectations(zt[-1, 0], loss, t)
         loss.backward()
 
         grad_z0 = z0.grad.item()
         grad_theta = func.theta.grad.item()
 
-        expected_grad_z0 = 1.0
-        expected_grad_theta = -T
-
         self.assertAlmostEqual(grad_z0, expected_grad_z0, places=8)
         self.assertAlmostEqual(grad_theta, expected_grad_theta, places=8)
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 backward tests")
     def test_backward_quadratic_loss_closed_form_theta_grad(self):
         """
-        With L = 0.5 * z(T)^2 and z(T)=theta*C, C=T^beta/Gamma(beta+1),
-        expected gradient under the current sensitivity convention is
-        dL/dtheta = -T * z(T) = -T * theta * C.
+        With L = 0.5 * z(T)^2, the current convention gives
+        dL/dtheta = -T * dL/dz(T) = -T * z(T).
         """
         device = _solver_device()
         theta0 = 1.2
@@ -132,16 +147,16 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
         zt = _run_solver(func, z0, t, beta)
         loss = 0.5 * zt[-1, 0] ** 2
+        _, expected_grad_theta = self._terminal_convention_expectations(zt[-1, 0], loss, t)
         loss.backward()
 
         grad_theta = func.theta.grad.item()
-        C = T ** beta_val / gamma_fn(beta_val + 1)
-        expected_grad_theta = -T * theta0 * C
 
         self.assertAlmostEqual(grad_theta, expected_grad_theta, places=7)
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 backward tests")
     def test_backward_theta_matches_standard_sensitivity_formula(self):
-        """Autograd theta gradient follows dL/dtheta = -T * z(T) for quadratic loss."""
+        """Quadratic terminal loss follows dL/dtheta = -T * dL/dz(T)."""
         device = _solver_device()
         theta0 = 1.1
         beta_val = 0.55
@@ -154,13 +169,32 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
         zt = _run_solver(func, z0, t, beta)
         loss = 0.5 * zt[-1, 0] ** 2
+        _, expected_grad = self._terminal_convention_expectations(zt[-1, 0], loss, t)
         loss.backward()
         grad_auto = func.theta.grad.item()
 
-        C = T ** beta_val / gamma_fn(beta_val + 1)
-        expected_grad = -T * theta0 * C
-
         self.assertAlmostEqual(grad_auto, expected_grad, places=7)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 backward tests")
+    def test_backward_cubic_terminal_loss_matches_terminal_sensitivity_rule(self):
+        """Cubic terminal loss still follows the same terminal adjoint convention."""
+        device = _solver_device()
+        theta0 = 0.9
+        beta_val = 0.65
+        N, T = 192, 1.0
+
+        func = ConstantParamForcing(theta0).to(device)
+        z0 = torch.zeros(1, dtype=torch.float64, device=device, requires_grad=True)
+        t = torch.linspace(0, T, N, dtype=torch.float64, device=device)
+        beta = torch.tensor(beta_val, dtype=torch.float64, device=device)
+
+        zt = _run_solver(func, z0, t, beta)
+        loss = (zt[-1, 0] ** 3) / 3.0
+        expected_grad_z0, expected_grad_theta = self._terminal_convention_expectations(zt[-1, 0], loss, t)
+        loss.backward()
+
+        self.assertAlmostEqual(z0.grad.item(), expected_grad_z0, places=7)
+        self.assertAlmostEqual(func.theta.grad.item(), expected_grad_theta, places=7)
 
 
 if __name__ == "__main__":
