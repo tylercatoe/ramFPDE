@@ -22,7 +22,7 @@ import torch.nn as nn
 from math import gamma as gamma_fn
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-from rampde.fixed_grid_base import FixedGridODESolverBase
+from rampde.fixed_grid_base_uniform import FixedGridODESolverBase
 from rampde.increment import L1
 
 
