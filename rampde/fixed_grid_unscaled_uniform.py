@@ -12,7 +12,7 @@ with scaling or exception handling overhead.
 from typing import Any, Optional, Tuple
 import torch
 from torch.amp import autocast
-from .fixed_grid_base import FixedGridODESolverBase
+from .fixed_grid_base_uniform import FixedGridODESolverBase
 from math import gamma
 
 # Import custom_fwd and custom_bwd from torch.cuda.amp
@@ -25,6 +25,8 @@ except ImportError:
 class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
     """
     Unscaled fixed grid ODE solver for optimal performance.
+
+    Backward pass 
     
     This variant eliminates all scaling infrastructure to provide the fastest
     possible performance. It performs simple gradient computation without:
