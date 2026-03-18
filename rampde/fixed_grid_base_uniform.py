@@ -97,11 +97,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
                         mu = predictor_factor * ((k + 1 - j_idx) ** beta - (k - j_idx) ** beta)
                         zk1P = torch.sum(mu.view(view_shape) * hist, dim=0)
 
-                        eta = corrector_factor * (
-                            (k + 2 - j_idx) ** (beta + 1)
-                            + (k - j_idx) ** (beta + 1)
-                            - 2 * (k + 1 - j_idx) ** (beta + 1)
-                        )
+                        eta = corrector_factor * ((k + 2 - j_idx) ** (beta + 1) + (k - j_idx) ** (beta + 1) - 2 * (k + 1 - j_idx) ** (beta + 1))
                         eta_0 = corrector_factor * (k ** (beta + 1) - (k - beta) * ((k + 1) ** beta))
                         eta[0] = eta_0
                         zk1 = torch.sum(eta.view(view_shape) * hist, dim=0)

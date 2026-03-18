@@ -97,9 +97,7 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
 
                 # Cache all j-dependent coefficients for this k.
                 j_idx = j_full[k - 1:N - 1]
-                nu_vec = nu_factor * (
-                    (j_idx + 2 - k) ** beta - (j_idx - k + 1) ** beta
-                )
+                nu_vec = nu_factor * ((j_idx + 2 - k) ** beta - (j_idx - k + 1) ** beta)
 
                 for offset, j in enumerate(range(k - 1, N - 1)):
                     # Prepare current state - directly from saved tensor
