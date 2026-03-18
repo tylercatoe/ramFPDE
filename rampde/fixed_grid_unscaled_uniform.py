@@ -88,43 +88,36 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         # Backward pass loop - no scaling, no exceptions
         
         h = t[1] - t[0]  # Assuming uniform grid for simplicity
+        nu_factor = h ** beta / beta
+        j_full = torch.arange(max(N - 1, 1), device=zt.device, dtype=dtype_hi)
 
         for k in reversed(range(1, N)): # k = N-1, N-2, ..., 1, we calculate at_history[k-1] at each iteration
             with torch.no_grad():
                 da = torch.zeros_like(a)
-                
-                for j in range(k-1, N-1):
+
+                # Cache all j-dependent coefficients for this k.
+                j_idx = j_full[k - 1:N - 1]
+                nu_vec = nu_factor * (
+                    (j_idx + 2 - k) ** beta - (j_idx - k + 1) ** beta
+                )
+
+                for offset, j in enumerate(range(k - 1, N - 1)):
                     # Prepare current state - directly from saved tensor
-                    a_ind = at_history[j+1]
-                    z_ind = zt[j+1].detach().requires_grad_(True) #####
+                    a_ind = at_history[j + 1]
+                    z_ind = zt[j + 1].detach().requires_grad_(True)
                     tj = t[j]
-                    
-                    nu_jk1 = h ** beta / beta * ((j + 2 - k) ** beta - (j - k + 1) ** beta)
+                    nu_jk1 = nu_vec[offset]
 
                     # Rebuild computational graph
                     with torch.enable_grad():
                         df = increment_func(ode_func, z_ind, tj, 0.0)
-                    
-                    # Compute gradients using the adjoint
-                    if any_param_requires_grad:
-                        grads = torch.autograd.grad(
-                            df, (z_ind, *params), a_ind,
-                            create_graph=False, allow_unused=True
-                        )
-                        da_ind, *dparams = grads
 
-                        # Handle None gradients (unused inputs)
-                        if da_ind is None:
-                            da_ind = torch.zeros_like(z_ind)
-                        dparams = [d if d is not None else torch.zeros_like(p) 
-                                for d, p in zip(dparams, params)]
-                        
-                    else:
-                        # only adjoint gradient needed
-                        da_ind = torch.autograd.grad(df, z_ind, a_ind, create_graph=False, allow_unused=True)[0]
-                        if da_ind is None:
-                            da_ind = torch.zeros_like(z_ind)
-                        dparams = [torch.zeros_like(p) for p in params]
+                    # Inner j-loop only needs d(df)/dz; parameter grads are accumulated below.
+                    da_ind = torch.autograd.grad(
+                        df, z_ind, a_ind, create_graph=False, allow_unused=True
+                    )[0]
+                    if da_ind is None:
+                        da_ind = torch.zeros_like(z_ind)
                     
                     da += nu_jk1 * da_ind.to(dtype_hi)
 
