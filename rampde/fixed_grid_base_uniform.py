@@ -78,43 +78,50 @@ class FixedGridODESolverBase(torch.autograd.Function):
             gamma_beta = gamma(beta.item())
 
             h = t[1] - t[0]  # Assuming uniform grid for simplicity
+            predictor_factor = h ** beta / beta
+            corrector_factor = h ** beta / (beta * (beta + 1))
+            # Reuse index buffer to avoid per-step arange allocations.
+            j_full = torch.arange(max(N - 1, 1), device=z0.device, dtype=dtype_hi)
             
             # Forward integration loop
             for k in range(0, N-1): 
-                
-                zk1P = 0.0 # Initialize current increment
-                zk1 = 0.0 # Initialize current increment
+                zk1P = torch.zeros_like(z0, dtype=dtype_hi, device=z0.device)
+                zk1 = torch.zeros_like(z0, dtype=dtype_hi, device=z0.device)
                 with autocast(device_type='cuda', dtype=dtype_low):
-                    
-                    for j in range(k):
-                        # Predictor sum
-                        f_func_j = f_func[j]
-                        mu_j_k1 = h ** beta / beta * ((k + 1 - j) ** beta - (k - j) ** beta)
-                        zk1P = zk1P + (mu_j_k1 * f_func_j).to(dtype_hi)
+                    if k > 0:
+                        # Vectorized history accumulation over j=0,...,k-1.
+                        j_idx = j_full[:k]
+                        hist = f_func[:k].to(dtype_hi)
+                        view_shape = (k,) + (1,) * (hist.dim() - 1)
 
-                        # Corrector sum
-                        if j == 0:
-                            eta_j_k1 = h ** beta / (beta*(beta+1)) * ((k) ** (beta+1) - (k-beta) * ((k+1) ** beta))
-                        else:
-                            eta_j_k1 = h ** beta / (beta*(beta+1)) * ((k + 2 - j) ** (beta+1) + (k  - j) ** (beta+1) - 2 * (k +1 - j) ** (beta+1))
-                        zk1 = zk1 + (eta_j_k1 * f_func_j).to(dtype_hi)
+                        mu = predictor_factor * ((k + 1 - j_idx) ** beta - (k - j_idx) ** beta)
+                        zk1P = torch.sum(mu.view(view_shape) * hist, dim=0)
+
+                        eta = corrector_factor * (
+                            (k + 2 - j_idx) ** (beta + 1)
+                            + (k - j_idx) ** (beta + 1)
+                            - 2 * (k + 1 - j_idx) ** (beta + 1)
+                        )
+                        eta_0 = corrector_factor * (k ** (beta + 1) - (k - beta) * ((k + 1) ** beta))
+                        eta[0] = eta_0
+                        zk1 = torch.sum(eta.view(view_shape) * hist, dim=0)
                     
                     
                     # j = k term
                     f_func_k = increment_func(ode_func, zt[k], t[k], 0.0)
                     f_func[k] = f_func_k.to(dtype_low)
-                    mu_k_k1 = h ** beta / beta
+                    mu_k_k1 = predictor_factor
                     zk1P = zt[0] + (1/gamma_beta * (zk1P + (mu_k_k1 * f_func_k))).to(dtype_hi)
 
                     if k == 0:
-                        eta_j_k1 =  h ** beta / (beta*(beta+1)) * ((k) ** (beta+1) - (k-beta) * ((k+1) ** beta))
+                        eta_j_k1 =  corrector_factor * ((k) ** (beta+1) - (k-beta) * ((k+1) ** beta))
                         zk1 = zk1 + (eta_j_k1 * f_func_k).to(dtype_hi)
                     else:
-                        eta_j_k1 = h ** beta / (beta*(beta+1)) * ((2) ** (beta+1) - 2)
+                        eta_j_k1 = corrector_factor * ((2) ** (beta+1) - 2)
                         zk1 = zk1 + (eta_j_k1 * f_func_k).to(dtype_hi)
 
                     # final corrector step
-                    eta_k1_k1 = h ** beta / (beta * (beta+1))
+                    eta_k1_k1 = corrector_factor
                     f_func_pred = increment_func(ode_func, zk1P, t[k+1], 0.0)
                     zk1 = zt[0] + 1/gamma_beta * (zk1 + (eta_k1_k1 * f_func_pred).to(dtype_hi))
 
