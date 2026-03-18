@@ -43,6 +43,17 @@ class ConstantParameterForcing(nn.Module):
         return self.theta * torch.ones_like(z)
 
 
+class TanhParameterForcing(nn.Module):
+    """f(t, z; theta) = theta * tanh(z)."""
+
+    def __init__(self, theta_init: float):
+        super().__init__()
+        self.theta = nn.Parameter(torch.tensor(theta_init, dtype=torch.float64))
+
+    def forward(self, t: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+        return self.theta * torch.tanh(z)
+
+
 def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.Tensor) -> torch.Tensor:
     # zt = Phi_L1(func, z0, beta, t) using the custom autograd path.
     params = tuple(func.parameters())
@@ -96,6 +107,27 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         # dL/dz0 = dL/dz(T), dL/dtheta = -T * dL/dz(T).
         jv_expected = dL_dzT * v_z0 + (-self.total_time * dL_dzT) * v_theta
         return jv_auto, jv_expected
+
+    def _terminal_grads_for_grid_tanh(self, N: int, theta0: float, z00: float, beta_val: float, loss_kind: str):
+        t = torch.linspace(0.0, 1.0, N, dtype=self.dtype, device=self.device)
+        beta = torch.tensor(beta_val, dtype=self.dtype, device=self.device)
+
+        func = TanhParameterForcing(theta0).to(self.device)
+        z0 = torch.tensor([z00], dtype=self.dtype, device=self.device, requires_grad=True)
+
+        zt = _run_solver(func, z0, t, beta)
+        if loss_kind == "linear":
+            loss = zt[-1, 0]
+        elif loss_kind == "quadratic":
+            loss = 0.5 * zt[-1, 0] ** 2
+        elif loss_kind == "cubic":
+            loss = (zt[-1, 0] ** 3) / 3.0
+        else:
+            raise ValueError(f"Unknown loss_kind: {loss_kind}")
+
+        loss.backward()
+
+        return z0.grad.item(), func.theta.grad.item()
 
     #@unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
     @unittest.skipUnless(False, 'hurry up')
@@ -234,7 +266,59 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                     f"errors={errs_theta}, active_steps={len(active_theta)}, improvements={improve_theta}"
                 ),
             )
-        
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    def test_tanh_forcing(self):
+        # Test with a nontrivial case, 
+        # f(t, z(t); theta) = theta * tanh(z(t)), various loss kinds
+
+        theta0 = 1.1
+        z00 = -0.2
+        beta_val = 0.6
+        loss_kinds = ["linear", "quadratic", "cubic"]
+        N_vals = [8, 16, 32, 64, 128, 256]
+        N_ref = 2048
+        for loss_kind in loss_kinds:
+            err_z0 = []
+            err_theta = []
+            print()
+            print("-" * 60)
+            print(f"Loss kind: {loss_kind}")
+            print("-" * 60)
+            g_z0_ref, g_theta_ref = self._terminal_grads_for_grid_tanh(N_ref, theta0, z00, beta_val, loss_kind=loss_kind)
+            print(f"Reference N={N_ref}: grad_z0={g_z0_ref:.8e}, grad_theta={g_theta_ref:.8e}")
+            print()
+
+            for i, N in enumerate(N_vals):
+                g_z0, g_theta = self._terminal_grads_for_grid_tanh(N, theta0, z00, beta_val, loss_kind=loss_kind)
+                e_z0 = abs(g_z0 - g_z0_ref)
+                e_theta = abs(g_theta - g_theta_ref)
+                err_z0.append(e_z0)
+                err_theta.append(e_theta)
+                if i > 0 and e_z0 > 0 and e_theta > 0:
+                    rate_z0 = math.log(prev_e_z0 / e_z0) / math.log(N / N_vals[i - 1])
+                    rate_theta = math.log(prev_e_theta / e_theta) / math.log(N / N_vals[i - 1])
+                else:
+                    rate_z0 = float('nan')
+                    rate_theta = float('nan')
+                print(f"N={N:4d}: grad_z0={g_z0:.8e}, grad_theta={g_theta:.8e}, err_z0={e_z0:.2e}, err_theta={e_theta:.2e}, rate_z0={rate_z0:.2f}, rate_theta={rate_theta:.2f}")
+                prev_e_z0 = e_z0
+                prev_e_theta = e_theta
+            
+        improve_z0 = sum(1 for i in range(1, len(err_z0)) if err_z0[i] <= err_z0[i - 1])
+        improve_theta = sum(1 for i in range(1, len(err_theta)) if err_theta[i] <= err_theta[i - 1])
+
+        # Require trend toward reference without enforcing strict monotonicity.
+        self.assertGreaterEqual(improve_z0, 3, f"Loss kind: {loss_kind}, z0 gradient errors did not improve enough: {err_z0}")
+        self.assertGreaterEqual(improve_theta, 3, f"Loss kind: {loss_kind}, theta gradient errors did not improve enough: {err_theta}")
+
+        # Also require that final error is smaller than coarse-grid error unless already at floor.
+        atol = 1e-12
+        if err_z0[0] > atol:
+            self.assertLessEqual(err_z0[-1], err_z0[0], f"Loss kind: {loss_kind}, z0 final error did not improve: {err_z0}")
+        if err_theta[0] > atol:
+            self.assertLessEqual(err_theta[-1], err_theta[0], f"Loss kind: {loss_kind}, theta final error did not improve: {err_theta}")
+
     
 if __name__ == "__main__":
     unittest.main(verbosity=2)
