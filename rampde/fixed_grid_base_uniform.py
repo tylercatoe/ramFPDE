@@ -83,27 +83,29 @@ class FixedGridODESolverBase(torch.autograd.Function):
             for k in range(0, N-1): 
                 
                 zk1P = 0.0 # Initialize current increment
-                with autocast(device_type='cuda', dtyp=dtype_low):
-                    # Predictor step first
+                zk1 = 0.0 # Initialize current increment
+                with autocast(device_type='cuda', dtype=dtype_low):
+                    
                     for j in range(k):
+                        # Predictor step
                         f_func_j = f_func[j]
                         mu_j_k1 = h ** beta / beta * ((k + 1 - j) ** beta - (k - j) ** beta)
                         zk1P = zk1P + (mu_j_k1 * f_func_j).to(dtype_hi)
+
+                        # Corrector step
+                        eta_j_k1 = h ** beta / (beta*(beta+1)) * ((k + 2 - j) ** (beta+1) + (k  - j) ** (beta+1) - 2 * (k +1 - j) ** (beta+1))
+                        zk1 = zk1 + (eta_j_k1 * f_func_j).to(dtype_hi)
                     
                     f_func_k = increment_func(ode_func, zt[k], t[k], 0.0)
                     f_func[k] = f_func_k.to(dtype_low)
                     mu_k_k1 = h ** beta / beta
                     zk1P = zt[0] + (1/gamma_beta * (zk1P + (mu_k_k1 * f_func_k))).to(dtype_hi)
 
-                    # Corrector step 
+                    # initial corrector step 
                     eta_0_k1 = h ** beta / (beta*(beta+1)) * ((k) ** beta - (k-beta) * (k ** beta))
-                    zk1 = eta_0_k1 * f_func[0].to(dtype_hi)
+                    zk1 = zk1 + eta_0_k1 * f_func[0].to(dtype_hi)
 
-                    for j in range(1, (k+1)):
-                        f_func_j = f_func[j]
-                        eta_j_k1 = h ** beta / (beta*(beta+1)) * ((k + 2 - j) ** (beta+1) + (k  - j) ** (beta+1) - 2 * (k +1 - j) ** (beta+1))
-                        zk1 = zk1 + (eta_j_k1 * f_func_j).to(dtype_hi)
-                    
+                    # final corrector step
                     eta_k1_k1 = h ** beta / (beta * (beta+1))
                     f_func_pred = increment_func(ode_func, zk1P, t[k+1], 0.0)
                     zk1 = zt[0] + 1/gamma_beta * (zk1 + (eta_k1_k1 * f_func_pred).to(dtype_hi))
