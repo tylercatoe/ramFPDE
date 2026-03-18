@@ -18,6 +18,7 @@ We verify that directional sensitivities from autograd gradients match this
 rule at the base point and across perturbed points.
 """
 
+import math
 import os
 import sys
 import unittest
@@ -136,5 +137,79 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                     self.assertAlmostEqual(jv_auto, jv_expected, places=7)
 
 
+    def _sensitivity_errors_for_grid(self, N: int, theta0: float, z00: float, beta_val: float, loss_kind: str):
+        t = torch.linspace(0.0, 1.0, N, dtype = self.dtype, device = self.device)
+        beta = torch.tensor(beta_val, dtype=self.dtype, device=self.device)
+        total_time = (t[-1] - t[0]).item()
+        
+        func = ConstantParameterForcing(theta0).to(self.device)
+        z0 = torch.tensor([z00], dtype=self.dtype, device=self.device, requires_grad = True)
+
+        zt = _run_solver(func, z0, t, beta)
+        z_terminal = zt[-1, 0]
+
+        if loss_kind == "linear":
+            loss = z_terminal
+            dL_dzT = 1.0
+        elif loss_kind == "quadratic":
+            loss = 0.5 * z_terminal ** 2
+            dL_dzT = z_terminal.item()
+        elif loss_kind == "cubic":
+            loss = (z_terminal ** 3) / 3.0
+            dL_dzT = z_terminal.item() ** 2
+        else:
+            raise ValueError(f"Unknown loss_kind: {loss_kind}")
+        
+        loss.backward()
+        grad_z0 = z0.grad.item()
+        grad_theta = func.theta.grad.item()
+
+        err_z0 = abs(grad_z0 - dL_dzT)
+        err_theta = abs(grad_theta - (-total_time * dL_dzT))
+        return err_z0, err_theta
+    
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
+    def test_sensitivity_errors_decrease_with_grid_refinement(self):
+        N_vals = [32, 64, 128, 256, 512]
+        theta0 = 1.1
+        z00 = -0.2
+        beta_val = 0.6
+        loss_kinds = ["linear", "quadratic", "cubic"]
+
+        for loss_kind in loss_kinds:
+            print("-" * 60)
+            print(f"Loss kind: {loss_kind}")
+            print("-" * 60)
+            print()
+            errs_z0 = []
+            errs_theta = []
+            for i in range(len(N_vals)):
+                N = N_vals[i]
+                e_z0, e_th = self._sensitivity_errors_for_grid(N, theta0, z00, beta_val, loss_kind)
+                errs_z0.append(e_z0)
+                errs_theta.append(e_th)
+                if i > 0 and errs_z0[-1] > 0 and errs_theta[-1] > 0:
+                    rate_z0 = math.log(errs_z0[-2] / errs_z0[-1]) / math.log(N / N_vals[i - 1])
+                    rate_theta = math.log(errs_theta[-2] / errs_theta[-1]) / math.log(N / N_vals[i - 1])
+                else:
+                    rate_z0 = float('nan')
+                    rate_theta = float('nan')
+                print(f'N = {N}: err_z0 = {e_z0:.2e}, err_theta = {e_th:.2e}, rate_z0 = {rate_z0:.2e}, rate_theta = {rate_theta:.2e}')
+
+            improve_z0 = sum(1 for i in range(1, len(errs_z0)) if errs_z0[i] <= errs_z0[i - 1])
+            improve_theta = sum(1 for i in range(1, len(errs_theta)) if errs_theta[i] <= errs_theta[i - 1])
+
+            self.assertGreaterEqual(
+                improve_z0,
+                3,
+                f"z0 sensitivity error did not decrease sufficiently for {loss_kind}: {errs_z0}",
+            )
+            self.assertGreaterEqual(
+                improve_theta,
+                3,
+                f"theta sensitivity error did not decrease sufficiently for {loss_kind}: {errs_theta}",
+            )
+        
+    
 if __name__ == "__main__":
     unittest.main(verbosity=2)
