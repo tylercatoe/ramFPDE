@@ -231,7 +231,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
     def test_sensitivity_errors_decrease_with_grid_refinement(self):
         print()
-        print("-" * 60 + f"\nTesting sensitivity errors and convergence rates with various loss forms:\n" + "-" * 60)
+        print("-" * 60 + f"\nTesting sensitivity errors, convergence rates with various loss forms:\n" + "-" * 60)
         print()
         N_vals = [2, 4, 8, 16, 32, 64, 128, 256]
         theta0 = 1.1
@@ -246,7 +246,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
 
         for loss_kind in loss_kinds:
             print()
-            print(" " * 5 + "-" * 50 + f"\n{loss_kind} loss" + f"\n" + " " * 5 + "-" * 50)
+            print(" " * 10 + "-" * 50 + f"\n " + " " * 10 + f"{loss_kind} loss" + f"\n" + " " * 10 + "-" * 50)
             print()
             errs_z0 = []
             errs_theta = []
@@ -261,7 +261,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 else:
                     rate_z0 = float('nan')
                     rate_theta = float('nan')
-                print(" " * 5 + f'N = {N}: err_z0 = {e_z0:.2e}, err_theta = {e_th:.2e}, rate_z0 = {rate_z0:.2e}, rate_theta = {rate_theta:.2e}')
+                print(" " * 10 + f'N = {N}: err_z0 = {e_z0:.2e}, err_theta = {e_th:.2e}, rate_z0 = {rate_z0:.2e}, rate_theta = {rate_theta:.2e}')
 
             # Only enforce improvement for transitions that are above a numerical floor.
             active_z0 = [
@@ -324,7 +324,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
             err_z0 = []
             err_theta = []
             print()
-            print(" " * 5 + "-" * 20 + f"\n {loss_kind} loss \n" + " " * 5 + "-" * 20)
+            print(" " * 10 + "-" * 20 + f"\n {loss_kind} loss \n" + " " * 10 + "-" * 20)
             print(" " * 10 + "Building reference solution...")
             g_z0_ref, g_theta_ref = self._terminal_grads_for_grid_tanh(N_ref, theta0, z00, beta_val, loss_kind=loss_kind)
             print(" " * 10 + f"Reference N={N_ref}: grad_z0={g_z0_ref:.8e}, grad_theta={g_theta_ref:.8e}")
@@ -345,6 +345,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 print(" " * 10 + f"N={N:4d}: grad_z0={g_z0:.8e}, grad_theta={g_theta:.8e}, err_z0={e_z0:.2e}, err_theta={e_theta:.2e}, rate_z0={rate_z0:.2f}, rate_theta={rate_theta:.2f}")
                 prev_e_z0 = e_z0
                 prev_e_theta = e_theta
+            print()
             
         improve_z0 = sum(1 for i in range(1, len(err_z0)) if err_z0[i] <= err_z0[i - 1])
         improve_theta = sum(1 for i in range(1, len(err_theta)) if err_theta[i] <= err_theta[i - 1])
