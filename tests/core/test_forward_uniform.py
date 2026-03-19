@@ -78,6 +78,9 @@ class TestABMForwardPass(unittest.TestCase):
     """Forward-pass correctness tests for ABM predictor-corrector."""
 
     def test_constant_forcing_exact_solution(self):
+        print()
+        print("-" * 60 + f"\nTesting constant forcing exact solution\n" + "-" * 60)
+        print()
         for beta_val in [0.3, 0.5, 0.75, 0.9, 1.0]:
             with self.subTest(beta=beta_val):
                 device = _solver_device()
@@ -89,10 +92,17 @@ class TestABMForwardPass(unittest.TestCase):
                 zt = _run_forward(ConstantForcing(1.0), z0, t, beta)
                 exact = (t ** beta_val / gamma_fn(beta_val + 1)).unsqueeze(1)
                 max_err = (zt - exact).abs().max().item()
-
-                self.assertLess(max_err, 1e-12, f"beta={beta_val}, max_err={max_err:.3e}")
+                try:
+                    self.assertLess(max_err, 1e-12, f"beta={beta_val}, max_err={max_err:.3e}")
+                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e} [PASS]")
+                except AssertionError:
+                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e} [FAIL]")
+                    raise
 
     def test_polynomial_manufactured_solution(self):
+        print()
+        print("-" * 60 + f"\nTesting polynomial manufactured solution\n" + "-" * 60)
+        print()
         for beta_val in [0.3, 0.5, 0.75, 0.9, 1.0]:
             with self.subTest(beta=beta_val):
                 device = _solver_device()
@@ -109,9 +119,17 @@ class TestABMForwardPass(unittest.TestCase):
                 max_err = (zt - exact).abs().max().item()
                 h = T / (N-1)
                 tol = 3 * (h ** (1.0 + beta_val))
-                self.assertLess(max_err, tol, f"beta={beta_val}, max_err={max_err:.3e}")
+                try:
+                    self.assertLess(max_err, tol, f"beta={beta_val}, max_err={max_err:.3e}")
+                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e}, tol={tol:.3e} [PASS]")
+                except AssertionError:
+                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e}, tol={tol:.3e} [FAIL]")
+                    raise
 
     def test_beta_one_linear_decay(self):
+        print()
+        print("-" * 60 + f"\nTesting beta=1 linear decay\n" + "-" * 60)
+        print()
         device = _solver_device()
         N, T = 200, 1.0
         t = torch.linspace(0, T, N, dtype=torch.float64, device=device)
@@ -121,10 +139,17 @@ class TestABMForwardPass(unittest.TestCase):
         zt = _run_forward(LinearDecay(), z0, t, beta)
         exact = torch.exp(-t).unsqueeze(1)
         max_err = (zt - exact).abs().max().item()
-
-        self.assertLess(max_err, 1e-5, f"beta=1, max_err={max_err:.3e}")
+        try:
+            self.assertLess(max_err, 1e-5, f"beta=1, max_err={max_err:.3e}")
+            print(" " * 5 + f"beta=1.00, max_err={max_err:.3e} [PASS]")
+        except AssertionError:
+            print(" " * 5 + f"beta=1.00, max_err={max_err:.3e} [FAIL]")
+            raise
 
     def test_convergence_under_refinement(self):
+        print()
+        print("-" * 60 + f"\nTesting convergence under grid refinement\n" + "-" * 60)
+        print()
         beta_val, T = 0.75, 1.0
         exact_T = T ** 2
         device = _solver_device()
@@ -135,7 +160,6 @@ class TestABMForwardPass(unittest.TestCase):
 
         errors = []
         grid_sizes = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
-        print()
         prev_error = None
         prev_N = None
         for N in grid_sizes:
@@ -155,14 +179,24 @@ class TestABMForwardPass(unittest.TestCase):
             prev_N = N
 
         for i in range(len(errors) - 1):
-            self.assertLess(
-                errors[i + 1],
-                errors[i],
-                f"Error did not decrease: N={grid_sizes[i]} -> N={grid_sizes[i + 1]}"
-            )
+            n0 = grid_sizes[i]
+            n1 = grid_sizes[i + 1]
+            try:
+                self.assertLess(
+                    errors[i + 1],
+                    errors[i],
+                    f"Error did not decrease: N={n0} -> N={n1}"
+                )
+                print(" " * 5 + f"N={n0} -> N={n1} error decrease [PASS]")
+            except AssertionError:
+                print(" " * 5 + f"N={n0} -> N={n1} error decrease [FAIL]")
+                raise
 
 
     def test_initial_condition_preserved(self):
+        print()
+        print("-" * 60 + f"\nTesting initial condition preservation\n" + "-" * 60)
+        print()
         for beta_val in [0.3, 0.7, 1.0]:
             with self.subTest(beta=beta_val):
                 device = _solver_device()
@@ -172,19 +206,30 @@ class TestABMForwardPass(unittest.TestCase):
                 beta = torch.tensor(beta_val, dtype=torch.float64, device=device)
 
                 zt = _run_forward(LinearDecay(), z0, t, beta)
-
-                self.assertAlmostEqual(zt[0, 0].item(), z0_val, places=14)
+                try:
+                    self.assertAlmostEqual(zt[0, 0].item(), z0_val, places=14)
+                    print(" " * 5 + f"beta={beta_val:.2f}, z(0) preserved [PASS]")
+                except AssertionError:
+                    print(" " * 5 + f"beta={beta_val:.2f}, z(0) preserved [FAIL]")
+                    raise
 
     def test_output_stays_on_input_device(self):
+        print()
+        print("-" * 60 + f"\nTesting output device consistency\n" + "-" * 60)
+        print()
         device = _solver_device()
         t = torch.linspace(0, 1, 32, dtype=torch.float64, device=device)
         z0 = torch.zeros(1, dtype=torch.float64, device=device)
         beta = torch.tensor(0.5, dtype=torch.float64, device=device)
 
         zt = _run_forward(ConstantForcing(1.0), z0, t, beta)
-
-        self.assertEqual(zt.device.type, device.type)
+        try:
+            self.assertEqual(zt.device.type, device.type)
+            print(" " * 5 + f"device={device.type}, output device match [PASS]")
+        except AssertionError:
+            print(" " * 5 + f"device={device.type}, output device match [FAIL]")
+            raise
 
 
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main(verbosity=1)

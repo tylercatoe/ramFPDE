@@ -319,7 +319,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         beta_val = 0.6
         loss_kinds = ["linear", "quadratic", "cubic"]
         N_vals = [4, 8, 16, 32, 64, 128, 256]
-        N_ref = 1024
+        N_ref = 2048
         for loss_kind in loss_kinds:
             err_z0 = []
             err_theta = []
