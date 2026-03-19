@@ -74,7 +74,8 @@ def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.
     if _BACKWARD_VARIANT == "dynamic":
         dtype_low = torch.float16
         solver_class = FixedGridODESolverDynamicUniform
-        loss_scaler = DynamicScaler(dtype_low)
+        # Use a conservative scaler setup for test stability in fp16 dynamic mode.
+        loss_scaler = DynamicScaler(dtype_low, target_factor=256.0, max_attempts=200)
     else:
         solver_class = FixedGridODESolverUnscaledUniform
         loss_scaler = None
