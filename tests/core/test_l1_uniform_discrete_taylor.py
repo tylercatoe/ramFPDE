@@ -324,7 +324,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
             err_z0 = []
             err_theta = []
             print()
-            print(" " * 10 + "-" * 20 + f"\n {loss_kind} loss \n" + " " * 10 + "-" * 20)
+            print(" " * 10 + "-" * 20 + f"\n" + " " * 10 + f"{loss_kind} loss" + f"\n" + " " * 10 + "-" * 20)
             print(" " * 10 + "Building reference solution...")
             g_z0_ref, g_theta_ref = self._terminal_grads_for_grid_tanh(N_ref, theta0, z00, beta_val, loss_kind=loss_kind)
             print(" " * 10 + f"Reference N={N_ref}: grad_z0={g_z0_ref:.8e}, grad_theta={g_theta_ref:.8e}")
