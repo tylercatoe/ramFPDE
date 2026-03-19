@@ -70,10 +70,10 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         
         # Initialize gradients
         N = t.shape[0]
-        params = tuple(params)
+        params = tuple(p.to(dtype_low) for p in params)
         
         a = at[-1].to(dtype_hi)
-        grad_theta = [torch.zeros_like(param) for param in params]
+        grad_theta = [torch.zeros_like(param, dtype=dtype_hi) for param in params]
         
         # Fast path check - skip parameter gradients if not needed
         any_param_requires_grad = any(p.requires_grad for p in params) if params else False
