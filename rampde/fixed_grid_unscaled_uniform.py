@@ -70,10 +70,7 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         
         # Initialize gradients
         N = t.shape[0]
-        params = tuple(p.to(dtype_low) for p in params)
-        old_params = {name: param.data.clone() for name, param in ode_func.named_parameters()}
-        for name, param in ode_func.named_parameters():
-            param.data = param.data.to(dtype_low)
+        params = tuple(params)
 
         a = at[-1].to(dtype_hi)
         grad_theta = [torch.zeros_like(param, dtype=dtype_hi) for param in params]
