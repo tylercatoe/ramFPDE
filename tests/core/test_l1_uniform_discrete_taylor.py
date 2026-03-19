@@ -67,6 +67,7 @@ def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.
 class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
 
     def setUp(self):
+        #print(f"Running: {self._testMethodName}")
         # Use float64 so directional sensitivity comparisons are numerically stable.
         self.device = torch.device("cuda")
         self.dtype = torch.float64
@@ -129,9 +130,12 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
 
         return z0.grad.item(), func.theta.grad.item()
 
-    #@unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
-    @unittest.skipUnless(False, 'hurry up')
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
     def test_directional_sensitivity_matches_rule_at_basepoint(self):
+        print()
+        print("-" * 60 + f"\nTesting directional sensitivity at z_0, theta_0\n" + "-" * 60)
+        print()
+
         torch.manual_seed(42)
 
         theta0 = 1.25
@@ -146,8 +150,10 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 self.assertAlmostEqual(jv_auto, jv_expected, places=7)
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
-    @unittest.skipUnless(False, 'hurry up')
     def test_directional_sensitivity_matches_rule_along_perturbation_path(self):
+        print()
+        print("-" * 60 + f"\nTesting directional sensitivity along perturbation paths\n" + "-" * 60)
+        print()
         torch.manual_seed(7)
 
         theta0 = 0.9
@@ -158,9 +164,10 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         # Probe the same direction along a perturbed path:
         # z0(h) = z00 + h v_z0, theta(h) = theta0 + h v_theta.
         h_vals = [0.0, 0.05, 0.1, 0.2, 0.3]
-        for loss_kind in ("quadratic", "cubic"):
+        for loss_kind in ("linear", "quadratic", "cubic"):
             for h in h_vals:
                 with self.subTest(loss_kind=loss_kind, h=h):
+                    print(" " * 10 + f"Testing {loss_kind} loss with h = {h}")
                     jv_auto, jv_expected = self._directional_pair(
                         theta0 + h * v_theta,
                         z00 + h * v_z0,
@@ -204,6 +211,9 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
     
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
     def test_sensitivity_errors_decrease_with_grid_refinement(self):
+        print()
+        print("-" * 60 + f"\nTesting sensitivity errors and convergence rates for \n" + "-" * 60)
+        print()
         N_vals = [2, 4, 8, 16, 32, 64, 128, 256]
         theta0 = 1.1
         z00 = -0.2
@@ -216,9 +226,8 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         jitter_rel = 0.05
 
         for loss_kind in loss_kinds:
-            print("-" * 60)
-            print(f"Loss kind: {loss_kind}")
-            print("-" * 60)
+            print()
+            print("-" * 60 + f"\nTesting with {loss_kind} loss" + f"\n" + "-" * 60)
             print()
             errs_z0 = []
             errs_theta = []
@@ -233,7 +242,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 else:
                     rate_z0 = float('nan')
                     rate_theta = float('nan')
-                print(f'N = {N}: err_z0 = {e_z0:.2e}, err_theta = {e_th:.2e}, rate_z0 = {rate_z0:.2e}, rate_theta = {rate_theta:.2e}')
+                print(" " * 5 + f'N = {N}: err_z0 = {e_z0:.2e}, err_theta = {e_th:.2e}, rate_z0 = {rate_z0:.2e}, rate_theta = {rate_theta:.2e}')
 
             # Only enforce improvement for transitions that are above a numerical floor.
             active_z0 = [
@@ -282,6 +291,9 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
     def test_tanh_forcing(self):
         # Test with a nontrivial case, 
         # f(t, z(t); theta) = theta * tanh(z(t)), various loss kinds
+        print()
+        print("-" * 60 + f"\nTesting sensitivity errors and convergence rates for tanh forcing\n" + "-" * 60)
+        print()
 
         theta0 = 1.1
         z00 = -0.2
@@ -293,12 +305,10 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
             err_z0 = []
             err_theta = []
             print()
-            print("-" * 60)
-            print(f"Loss kind: {loss_kind}")
-            print("-" * 60)
-            print("Building reference solution...")
+            print("-" * 20 + f"\n {loss_kind} loss \n" + "-" * 20)
+            print(" " * 5 + "Building reference solution...")
             g_z0_ref, g_theta_ref = self._terminal_grads_for_grid_tanh(N_ref, theta0, z00, beta_val, loss_kind=loss_kind)
-            print(f"Reference N={N_ref}: grad_z0={g_z0_ref:.8e}, grad_theta={g_theta_ref:.8e}")
+            print(" " * 5 + f"Reference N={N_ref}: grad_z0={g_z0_ref:.8e}, grad_theta={g_theta_ref:.8e}")
             print()
 
             for i, N in enumerate(N_vals):
@@ -313,7 +323,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 else:
                     rate_z0 = float('nan')
                     rate_theta = float('nan')
-                print(f"N={N:4d}: grad_z0={g_z0:.8e}, grad_theta={g_theta:.8e}, err_z0={e_z0:.2e}, err_theta={e_theta:.2e}, rate_z0={rate_z0:.2f}, rate_theta={rate_theta:.2f}")
+                print(" " * 5 + f"N={N:4d}: grad_z0={g_z0:.8e}, grad_theta={g_theta:.8e}, err_z0={e_z0:.2e}, err_theta={e_theta:.2e}, rate_z0={rate_z0:.2f}, rate_theta={rate_theta:.2f}")
                 prev_e_z0 = e_z0
                 prev_e_theta = e_theta
             
@@ -331,6 +341,6 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         if err_theta[0] > atol:
             self.assertLessEqual(err_theta[-1], err_theta[0], f"Loss kind: {loss_kind}, theta final error did not improve: {err_theta}")
 
-    
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main(verbosity=1)
