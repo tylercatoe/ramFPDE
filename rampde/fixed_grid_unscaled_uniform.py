@@ -82,14 +82,14 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         gamma_beta = gamma(beta.item())
 
         # Initialize adjoint storage
-        at_history = torch.zeros_like(zt)
+        at_history = torch.zeros_like(zt, dtype = dtype_hi)
         at_history[-1] = at[-1].to(dtype_hi) 
 
         # Backward pass loop - no scaling, no exceptions
         
         h = t[1] - t[0]  # Assuming uniform grid for simplicity
         nu_factor = h ** beta / beta
-        j_full = torch.arange(max(N - 1, 1), device=zt.device, dtype=dtype_hi)
+        j_full = torch.arange(max(N - 1, 1), device=zt.device, dtype=dtype_low)
 
         for k in reversed(range(1, N)): # k = N-1, N-2, ..., 1, we calculate at_history[k-1] at each iteration
             with torch.no_grad():
@@ -101,8 +101,8 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
 
                 for offset, j in enumerate(range(k - 1, N - 1)):
                     # Prepare current state - directly from saved tensor
-                    a_ind = at_history[j + 1]
-                    z_ind = zt[j + 1].detach().requires_grad_(True)
+                    a_ind = at_history[j + 1].to(dtype_low)
+                    z_ind = zt[j + 1].to(dtype_low).detach().requires_grad_(True)
                     tj = t[j]
                     nu_jk1 = nu_vec[offset]
 
@@ -123,8 +123,8 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                 at_history[k-1] = da.to(dtype_hi)
 
             if any_param_requires_grad:
-                z_k = zt[k].detach().requires_grad_(True)
-                z_km1 = zt[k-1].detach().requires_grad_(True)
+                z_k = zt[k].to(dtype_low).detach().requires_grad_(True)
+                z_km1 = zt[k-1].to(dtype_low).detach().requires_grad_(True)
 
                 with torch.enable_grad():
                     dfk = increment_func(ode_func, z_k, t[k], 0.0)
@@ -144,9 +144,12 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                 dparams_km1 = [d if d is not None else torch.zeros_like(p)
                                 for d, p in zip(grads, params)]
                 
-                for i, (d_k, d_km1) in enumerate(zip(dparams_k, dparams_km1)):
-                    trap_update = 0.5 * h * (d_k.to(dtype_hi) + d_km1.to(dtype_hi))
-                    grad_theta[i].sub_(trap_update.to(grad_theta[i].dtype))
+                trap_updates = [0.5 * h * (d_k.to(dtype_hi) + d_km1.to(dtype_hi)) for d_k, d_km1 in zip(dparams_k, dparams_km1)]
+                torch._foreach_sub_(grad_theta, trap_updates) 
+                
+                # for i, (d_k, d_km1) in enumerate(zip(dparams_k, dparams_km1)):
+                #     trap_update = 0.5 * h * (d_k.to(dtype_hi) + d_km1.to(dtype_hi))
+                #     grad_theta[i].sub_(trap_update.to(grad_theta[i].dtype))
         
         # Return gradients for all inputs to forward pass
         # (increment_func, ode_func, z0, beta, t, loss_scaler, *params)
