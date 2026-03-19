@@ -133,6 +133,9 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                                 )
                                 da_ind, *dparams = grads
 
+                                if da_ind is None:
+                                    da_ind = torch.zeros_like(z_ind)
+
                                 # Handle None gradients for parameters
                                 dparams = [d if d is not None else torch.zeros_like(p) for d, p in zip(dparams, params)]
                             else:
@@ -140,6 +143,8 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                                 da_ind = torch.autograd.grad(
                                     df, z_ind, scaler.S * a_ind, create_graph=False, allow_unused=True
                                 )[0]
+                                if da_ind is None:
+                                    da_ind = torch.zeros_like(z_ind)
                                 dparams = [torch.zeros_like(p) for p in params]
 
                             # Check for overflow in computed gradients
