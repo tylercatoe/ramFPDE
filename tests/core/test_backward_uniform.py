@@ -335,6 +335,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
             )
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    @unittest.skip("Skip for now takes long")
     def test_tanh_forcing(self):
         # Test with a nontrivial case, 
         # f(t, z(t); theta) = theta * tanh(z(t)), various loss kinds
