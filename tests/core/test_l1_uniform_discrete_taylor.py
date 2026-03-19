@@ -1,21 +1,21 @@
 """
-Discrete-sensitivity directional tests for the uniform L1 backward path.
+Discrete-sensitivity tests for the uniform L1 custom backward path.
 
-These tests mirror the directional structure of Taylor checks (random directions
-and perturbed base points), but validate the architecture-2 sensitivity rule
-directly instead of forward-map Taylor convergence.
+This file focuses on checking:
+1) Directional checks at a base point and along perturbation paths.
+2) Grid-refinement trend checks for the manufactured constant-forcing case.
+3) Reference-grid consistency checks for a nonlinear tanh-forcing case.
 
 For the manufactured scalar problem
 
     _0^C D_t^beta z(t) = theta,    z(0) = z0,
 
-the implemented uniform backward convention for terminal-only losses is
+the implemented terminal-loss sensitivity convention is
 
     dL/dz0    = dL/dz(T)
     dL/dtheta = -T * dL/dz(T),  where T = t[-1] - t[0].
 
-We verify that directional sensitivities from autograd gradients match this
-rule at the base point and across perturbed points.
+The directional tests verify autograd gradients against this rule.
 """
 
 import math
@@ -287,7 +287,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         z00 = -0.2
         beta_val = 0.6
         loss_kinds = ["linear", "quadratic", "cubic"]
-        N_vals = [8, 16, 32, 64, 128, 256]
+        N_vals = [4, 8, 16, 32, 64, 128, 256]
         N_ref = 1024
         for loss_kind in loss_kinds:
             err_z0 = []
