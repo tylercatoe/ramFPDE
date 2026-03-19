@@ -26,6 +26,7 @@ import warnings
 
 import torch
 import torch.nn as nn
+from torch.amp import autocast
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from rampde.increment import L1
@@ -40,6 +41,7 @@ if _BACKWARD_VARIANT not in {"unscaled", "dynamic"}:
         "RAMPDE_UNIFORM_BACKWARD_VARIANT must be 'unscaled' or 'dynamic', "
         f"got '{_BACKWARD_VARIANT}'"
     )
+_IS_DYNAMIC = _BACKWARD_VARIANT == "dynamic"
 
 
 class ConstantParameterForcing(nn.Module):
@@ -70,7 +72,7 @@ def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.
     func = func.to(z0.device)
 
     if _BACKWARD_VARIANT == "dynamic":
-        dtype_low = torch.get_autocast_dtype('cuda') if torch.is_autocast_enabled() else z0.dtype
+        dtype_low = torch.float16
         solver_class = FixedGridODESolverDynamicUniform
         loss_scaler = DynamicScaler(dtype_low)
     else:
@@ -79,7 +81,11 @@ def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        zt = solver_class.apply(L1(), func, z0, beta, t, loss_scaler, *params)
+        if _IS_DYNAMIC:
+            with autocast(device_type='cuda', dtype=dtype_low):
+                zt = solver_class.apply(L1(), func, z0, beta, t, loss_scaler, *params)
+        else:
+            zt = solver_class.apply(L1(), func, z0, beta, t, loss_scaler, *params)
     return zt
 
 
@@ -96,16 +102,19 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
 
     def setUp(self):
         #print(f"Running: {self._testMethodName}")
-        # Use float64 so directional sensitivity comparisons are numerically stable.
+        # Use stricter dtype/tolerance for unscaled and practical mixed-precision settings for dynamic.
         self.device = torch.device("cuda")
-        self.dtype = torch.float64
+        self.dtype = torch.float32 if _IS_DYNAMIC else torch.float64
+        self.directional_places = 4 if _IS_DYNAMIC else 7
+        self.floor_atol = 1e-6 if _IS_DYNAMIC else 1e-10
+        self.jitter_rel = 0.20 if _IS_DYNAMIC else 0.05
         self.beta = torch.tensor(0.6, dtype=self.dtype, device=self.device)
         self.t = torch.linspace(0.0, 1.0, 192, dtype=self.dtype, device=self.device)
         # T = t[-1] - t[0] in dL/dtheta = -T * dL/dz(T).
         self.total_time = (self.t[-1] - self.t[0]).item()
 
     def _directional_pair(self, theta0: float, z00: float, v_z0: float, v_theta: float, loss_kind: str):
-        func = ConstantParameterForcing(theta0).to(self.device)
+        func = ConstantParameterForcing(theta0).to(device=self.device, dtype=self.dtype)
         z0 = torch.tensor([z00], dtype=self.dtype, device=self.device, requires_grad=True)
 
         zt = _run_solver(func, z0, self.t, self.beta)
@@ -141,7 +150,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         t = torch.linspace(0.0, 1.0, N, dtype=self.dtype, device=self.device)
         beta = torch.tensor(beta_val, dtype=self.dtype, device=self.device)
 
-        func = TanhParameterForcing(theta0).to(self.device)
+        func = TanhParameterForcing(theta0).to(device=self.device, dtype=self.dtype)
         z0 = torch.tensor([z00], dtype=self.dtype, device=self.device, requires_grad=True)
 
         zt = _run_solver(func, z0, t, beta)
@@ -176,7 +185,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
             with self.subTest(loss_kind=loss_kind):
                 jv_auto, jv_expected = self._directional_pair(theta0, z00, v_z0, v_theta, loss_kind)
                 try:
-                    self.assertAlmostEqual(jv_auto, jv_expected, places=7)
+                    self.assertAlmostEqual(jv_auto, jv_expected, places=self.directional_places)
                     print(" " * 10 + f"Testing {loss_kind} loss:   [PASS]")
                 except AssertionError:
                     print(" " * 10 + f"Testing {loss_kind} loss:   [FAIL]")
@@ -208,7 +217,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                         loss_kind,
                     )
                     try:
-                        self.assertAlmostEqual(jv_auto, jv_expected, places=7)
+                        self.assertAlmostEqual(jv_auto, jv_expected, places=self.directional_places)
                         print(" " * 10 + f"Testing {loss_kind} loss with h = {h} [PASS]")
                     except AssertionError:
                         print(" " * 10 + f"Testing {loss_kind} loss with h = {h} [FAIL]")
@@ -221,7 +230,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         beta = torch.tensor(beta_val, dtype=self.dtype, device=self.device)
         total_time = (t[-1] - t[0]).item()
         
-        func = ConstantParameterForcing(theta0).to(self.device)
+        func = ConstantParameterForcing(theta0).to(device=self.device, dtype=self.dtype)
         z0 = torch.tensor([z00], dtype=self.dtype, device=self.device, requires_grad = True)
 
         zt = _run_solver(func, z0, t, beta)
@@ -257,11 +266,10 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         z00 = -0.2
         beta_val = 0.6
         loss_kinds = ["linear", "quadratic", "cubic"]
-        # If errors are already at machine precision, do not require further decreases.
-        atol_z0 = 1e-10
-        atol_theta = 1e-10
-        # Allow mild jitter in near-floor regions.
-        jitter_rel = 0.05
+        # If errors are already at numerical floor, do not require further decreases.
+        atol_z0 = self.floor_atol
+        atol_theta = self.floor_atol
+        jitter_rel = self.jitter_rel
 
         for loss_kind in loss_kinds:
             print()
@@ -374,7 +382,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         self.assertGreaterEqual(improve_theta, 3, f"Loss kind: {loss_kind}, theta gradient errors did not improve enough: {err_theta}")
 
         # Also require that final error is smaller than coarse-grid error unless already at floor.
-        atol = 1e-12
+        atol = 1e-6 if _IS_DYNAMIC else 1e-12
         if err_z0[0] > atol:
             self.assertLessEqual(err_z0[-1], err_z0[0], f"Loss kind: {loss_kind}, z0 final error did not improve: {err_z0}")
         if err_theta[0] > atol:
