@@ -1,5 +1,5 @@
 """
-Base class for fixed grid ODE solvers. (Uniform grid, L1 Method, NOT PREDICTOR-CORRECTOR)
+Base class for fixed grid ODE solvers. (Uniform grid, ABM Predictor-Corrector)
 
 This module provides the shared forward pass implementation that is identical
 across all fixed grid solver variants. Only the backward pass differs between
