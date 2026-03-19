@@ -30,6 +30,16 @@ import torch.nn as nn
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from rampde.increment import L1
 from rampde.fixed_grid_unscaled_uniform import FixedGridODESolverUnscaledUniform
+from rampde.fixed_grid_dynamic_uniform import FixedGridODESolverDynamicUniform
+from rampde.loss_scalers import DynamicScaler
+
+
+_BACKWARD_VARIANT = os.getenv("RAMPDE_UNIFORM_BACKWARD_VARIANT", "unscaled").strip().lower()
+if _BACKWARD_VARIANT not in {"unscaled", "dynamic"}:
+    raise ValueError(
+        "RAMPDE_UNIFORM_BACKWARD_VARIANT must be 'unscaled' or 'dynamic', "
+        f"got '{_BACKWARD_VARIANT}'"
+    )
 
 
 class ConstantParameterForcing(nn.Module):
@@ -58,9 +68,18 @@ def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.
     # zt = Phi_L1(func, z0, beta, t) using the custom autograd path.
     params = tuple(func.parameters())
     func = func.to(z0.device)
+
+    if _BACKWARD_VARIANT == "dynamic":
+        dtype_low = torch.get_autocast_dtype('cuda') if torch.is_autocast_enabled() else z0.dtype
+        solver_class = FixedGridODESolverDynamicUniform
+        loss_scaler = DynamicScaler(dtype_low)
+    else:
+        solver_class = FixedGridODESolverUnscaledUniform
+        loss_scaler = None
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        zt = FixedGridODESolverUnscaledUniform.apply(L1(), func, z0, beta, t, None, *params)
+        zt = solver_class.apply(L1(), func, z0, beta, t, loss_scaler, *params)
     return zt
 
 
