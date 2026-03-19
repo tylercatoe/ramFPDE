@@ -94,9 +94,9 @@ class TestABMForwardPass(unittest.TestCase):
                 max_err = (zt - exact).abs().max().item()
                 try:
                     self.assertLess(max_err, 1e-12, f"beta={beta_val}, max_err={max_err:.3e}")
-                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e} [PASS]")
+                    print(" " * 5 + f"beta = {beta_val:.2f}, max_err = {max_err:.3e} [PASS]")
                 except AssertionError:
-                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e} [FAIL]")
+                    print(" " * 5 + f"beta = {beta_val:.2f}, max_err = {max_err:.3e} [FAIL]")
                     raise
 
     def test_polynomial_manufactured_solution(self):
@@ -121,14 +121,14 @@ class TestABMForwardPass(unittest.TestCase):
                 tol = 3 * (h ** (1.0 + beta_val))
                 try:
                     self.assertLess(max_err, tol, f"beta={beta_val}, max_err={max_err:.3e}")
-                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e}, tol={tol:.3e} [PASS]")
+                    print(" " * 5 + f"beta = {beta_val:.2f}, max_err = {max_err:.3e}, tol = {tol:.3e} [PASS]")
                 except AssertionError:
-                    print(" " * 5 + f"beta={beta_val:.2f}, max_err={max_err:.3e}, tol={tol:.3e} [FAIL]")
+                    print(" " * 5 + f"beta = {beta_val:.2f}, max_err = {max_err:.3e}, tol = {tol:.3e} [FAIL]")
                     raise
 
     def test_beta_one_linear_decay(self):
         print()
-        print("-" * 60 + f"\nTesting beta=1 linear decay\n" + "-" * 60)
+        print("-" * 60 + f"\nTesting beta = 1 linear decay\n" + "-" * 60)
         print()
         device = _solver_device()
         N, T = 200, 1.0
@@ -141,14 +141,14 @@ class TestABMForwardPass(unittest.TestCase):
         max_err = (zt - exact).abs().max().item()
         try:
             self.assertLess(max_err, 1e-5, f"beta=1, max_err={max_err:.3e}")
-            print(" " * 5 + f"beta=1.00, max_err={max_err:.3e} [PASS]")
+            print(" " * 5 + f"beta = 1.00, max_err = {max_err:.3e} [PASS]")
         except AssertionError:
-            print(" " * 5 + f"beta=1.00, max_err={max_err:.3e} [FAIL]")
+            print(" " * 5 + f"beta = 1.00, max_err = {max_err:.3e} [FAIL]")
             raise
 
     def test_convergence_under_refinement(self):
         print()
-        print("-" * 60 + f"\nTesting convergence under grid refinement\n" + "-" * 60)
+        print("-" * 60 + f"\nTesting convergence under grid refinement with polynomial soln\n" + "-" * 60)
         print()
         beta_val, T = 0.75, 1.0
         exact_T = T ** 2
@@ -171,13 +171,13 @@ class TestABMForwardPass(unittest.TestCase):
 
             if prev_error is not None and err > 0.0 and prev_error > 0.0:
                 observed_rate = math.log(prev_error / err) / math.log(float(N) / float(prev_N))
-                print(f'N = {N}, error = {err:.3e}, observed_rate = {observed_rate:.3f}')
+                print(" " * 5 + f'N = {N}, error = {err:.3e}, observed_rate = {observed_rate:.3f}')
             else:
-                print(f'N = {N}, error = {err:.3e}, observed_rate = n/a')
+                print(" " * 5 + f'N = {N}, error = {err:.3e}, observed_rate = n/a')
 
             prev_error = err
             prev_N = N
-
+        print()
         for i in range(len(errors) - 1):
             n0 = grid_sizes[i]
             n1 = grid_sizes[i + 1]
@@ -187,9 +187,9 @@ class TestABMForwardPass(unittest.TestCase):
                     errors[i],
                     f"Error did not decrease: N={n0} -> N={n1}"
                 )
-                print(" " * 5 + f"N={n0} -> N={n1} error decrease [PASS]")
+                print(" " * 5 + f"N = {n0} -> N = {n1} error decrease [PASS]")
             except AssertionError:
-                print(" " * 5 + f"N={n0} -> N={n1} error decrease [FAIL]")
+                print(" " * 5 + f"N = {n0} -> N = {n1} error decrease [FAIL]")
                 raise
 
 
@@ -208,9 +208,9 @@ class TestABMForwardPass(unittest.TestCase):
                 zt = _run_forward(LinearDecay(), z0, t, beta)
                 try:
                     self.assertAlmostEqual(zt[0, 0].item(), z0_val, places=14)
-                    print(" " * 5 + f"beta={beta_val:.2f}, z(0) preserved [PASS]")
+                    print(" " * 5 + f"beta = {beta_val:.2f}, z(0) preserved [PASS]")
                 except AssertionError:
-                    print(" " * 5 + f"beta={beta_val:.2f}, z(0) preserved [FAIL]")
+                    print(" " * 5 + f"beta = {beta_val:.2f}, z(0) preserved [FAIL]")
                     raise
 
     def test_output_stays_on_input_device(self):
@@ -225,9 +225,9 @@ class TestABMForwardPass(unittest.TestCase):
         zt = _run_forward(ConstantForcing(1.0), z0, t, beta)
         try:
             self.assertEqual(zt.device.type, device.type)
-            print(" " * 5 + f"device={device.type}, output device match [PASS]")
+            print(" " * 5 + f"device = {device.type}, output device match [PASS]")
         except AssertionError:
-            print(" " * 5 + f"device={device.type}, output device match [FAIL]")
+            print(" " * 5 + f"device = {device.type}, output device match [FAIL]")
             raise
 
 
