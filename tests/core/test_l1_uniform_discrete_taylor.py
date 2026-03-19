@@ -327,7 +327,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
             print(" " * 10 + "-" * 20 + f"\n" + " " * 10 + f"{loss_kind} loss" + f"\n" + " " * 10 + "-" * 20)
             print(" " * 10 + "Building reference solution...")
             g_z0_ref, g_theta_ref = self._terminal_grads_for_grid_tanh(N_ref, theta0, z00, beta_val, loss_kind=loss_kind)
-            print(" " * 10 + f"Reference N={N_ref}: grad_z0={g_z0_ref:.8e}, grad_theta={g_theta_ref:.8e}")
+            print(" " * 10 + f"Reference N={N_ref}: grad_z0={g_z0_ref:.4e}, grad_theta={g_theta_ref:.4e}")
             print()
 
             for i, N in enumerate(N_vals):
@@ -342,7 +342,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 else:
                     rate_z0 = float('nan')
                     rate_theta = float('nan')
-                print(" " * 10 + f"N={N:4d}: grad_z0={g_z0:.8e}, grad_theta={g_theta:.8e}, err_z0={e_z0:.2e}, err_theta={e_theta:.2e}, rate_z0={rate_z0:.2f}, rate_theta={rate_theta:.2f}")
+                print(" " * 10 + f"N={N:4d}: grad_z0={g_z0:.4e}, grad_theta={g_theta:.4e}, err_z0={e_z0:.2e}, err_theta={e_theta:.2e}, rate_z0={rate_z0:.2f}, rate_theta={rate_theta:.2f}")
                 prev_e_z0 = e_z0
                 prev_e_theta = e_theta
             print()
