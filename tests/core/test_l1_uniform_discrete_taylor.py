@@ -64,6 +64,15 @@ def _run_solver(func: nn.Module, z0: torch.Tensor, t: torch.Tensor, beta: torch.
     return zt
 
 
+def _safe_rate(prev_err: float, curr_err: float, prev_n: int, curr_n: int) -> float:
+    """Return observed step-doubling rate, or NaN when not well-defined."""
+    if prev_err <= 0.0 or curr_err <= 0.0:
+        return float('nan')
+    if curr_n <= prev_n:
+        return float('nan')
+    return math.log(prev_err / curr_err) / math.log(curr_n / prev_n)
+
+
 class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
 
     def setUp(self):
@@ -147,7 +156,12 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         for loss_kind in ("linear", "quadratic", "cubic"):
             with self.subTest(loss_kind=loss_kind):
                 jv_auto, jv_expected = self._directional_pair(theta0, z00, v_z0, v_theta, loss_kind)
-                self.assertAlmostEqual(jv_auto, jv_expected, places=7)
+                try:
+                    self.assertAlmostEqual(jv_auto, jv_expected, places=7)
+                    print(" " * 10 + f"Testing {loss_kind} loss:   [PASS]")
+                except AssertionError:
+                    print(" " * 10 + f"Testing {loss_kind} loss:   [FAIL]")
+                    raise
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")
     def test_directional_sensitivity_matches_rule_along_perturbation_path(self):
@@ -167,7 +181,6 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         for loss_kind in ("linear", "quadratic", "cubic"):
             for h in h_vals:
                 with self.subTest(loss_kind=loss_kind, h=h):
-                    print(" " * 10 + f"Testing {loss_kind} loss with h = {h}")
                     jv_auto, jv_expected = self._directional_pair(
                         theta0 + h * v_theta,
                         z00 + h * v_z0,
@@ -175,7 +188,13 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                         v_theta,
                         loss_kind,
                     )
-                    self.assertAlmostEqual(jv_auto, jv_expected, places=7)
+                    try:
+                        self.assertAlmostEqual(jv_auto, jv_expected, places=7)
+                        print(" " * 10 + f"Testing {loss_kind} loss with h = {h} [PASS]")
+                    except AssertionError:
+                        print(" " * 10 + f"Testing {loss_kind} loss with h = {h} [FAIL]")
+                        raise
+            print()
 
 
     def _sensitivity_errors_for_grid(self, N: int, theta0: float, z00: float, beta_val: float, loss_kind: str):
@@ -236,9 +255,9 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 e_z0, e_th = self._sensitivity_errors_for_grid(N, theta0, z00, beta_val, loss_kind)
                 errs_z0.append(e_z0)
                 errs_theta.append(e_th)
-                if i > 0 and errs_z0[-1] > 0 and errs_theta[-1] > 0:
-                    rate_z0 = math.log(errs_z0[-2] / errs_z0[-1]) / math.log(N / N_vals[i - 1])
-                    rate_theta = math.log(errs_theta[-2] / errs_theta[-1]) / math.log(N / N_vals[i - 1])
+                if i > 0:
+                    rate_z0 = _safe_rate(errs_z0[-2], errs_z0[-1], N_vals[i - 1], N)
+                    rate_theta = _safe_rate(errs_theta[-2], errs_theta[-1], N_vals[i - 1], N)
                 else:
                     rate_z0 = float('nan')
                     rate_theta = float('nan')
@@ -317,9 +336,9 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
                 e_theta = abs(g_theta - g_theta_ref)
                 err_z0.append(e_z0)
                 err_theta.append(e_theta)
-                if i > 0 and e_z0 > 0 and e_theta > 0:
-                    rate_z0 = math.log(prev_e_z0 / e_z0) / math.log(N / N_vals[i - 1])
-                    rate_theta = math.log(prev_e_theta / e_theta) / math.log(N / N_vals[i - 1])
+                if i > 0:
+                    rate_z0 = _safe_rate(prev_e_z0, e_z0, N_vals[i - 1], N)
+                    rate_theta = _safe_rate(prev_e_theta, e_theta, N_vals[i - 1], N)
                 else:
                     rate_z0 = float('nan')
                     rate_theta = float('nan')
