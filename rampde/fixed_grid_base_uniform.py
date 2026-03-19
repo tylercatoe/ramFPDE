@@ -81,7 +81,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
             predictor_factor = h ** beta / beta
             corrector_factor = h ** beta / (beta * (beta + 1))
             # Reuse index buffer to avoid per-step arange allocations.
-            j_full = torch.arange(max(N - 1, 1), device=z0.device, dtype=dtype_hi)
+            j_full = torch.arange(max(N - 1, 1), device=z0.device, dtype=dtype_low) 
             
             # Forward integration loop
             for k in range(0, N-1): 
@@ -98,28 +98,26 @@ class FixedGridODESolverBase(torch.autograd.Function):
                         zk1P = torch.sum(mu.view(view_shape) * hist, dim=0)
 
                         eta = corrector_factor * ((k + 2 - j_idx) ** (beta + 1) + (k - j_idx) ** (beta + 1) - 2 * (k + 1 - j_idx) ** (beta + 1))
-                        eta_0 = corrector_factor * (k ** (beta + 1) - (k - beta) * ((k + 1) ** beta))
-                        eta[0] = eta_0
+                        eta[0] = corrector_factor * (k ** (beta + 1) - (k - beta) * ((k + 1) ** beta))
                         zk1 = torch.sum(eta.view(view_shape) * hist, dim=0)
                     
-                    
                     # j = k term
-                    f_func_k = increment_func(ode_func, zt[k], t[k], 0.0)
+                    f_func_k = increment_func(ode_func, (zt[k]).to(dtype_low), t[k], 0.0)
                     f_func[k] = f_func_k.to(dtype_low)
                     mu_k_k1 = predictor_factor
-                    zk1P = zt[0] + (1/gamma_beta * (zk1P + (mu_k_k1 * f_func_k))).to(dtype_hi)
+                    zk1P = z0 + 1/gamma_beta * (zk1P + (mu_k_k1 * f_func_k.to(dtype_hi)))
 
                     if k == 0:
-                        eta_j_k1 =  corrector_factor * ((k) ** (beta+1) - (k-beta) * ((k+1) ** beta))
-                        zk1 = zk1 + (eta_j_k1 * f_func_k).to(dtype_hi)
+                        eta_j_k1 =  corrector_factor * (beta)
+                        zk1 = zk1 + eta_j_k1 * f_func_k.to(dtype_hi)
                     else:
                         eta_j_k1 = corrector_factor * ((2) ** (beta+1) - 2)
-                        zk1 = zk1 + (eta_j_k1 * f_func_k).to(dtype_hi)
+                        zk1 = zk1 + eta_j_k1 * f_func_k.to(dtype_hi)
 
                     # final corrector step
                     eta_k1_k1 = corrector_factor
                     f_func_pred = increment_func(ode_func, zk1P, t[k+1], 0.0)
-                    zk1 = zt[0] + 1/gamma_beta * (zk1 + (eta_k1_k1 * f_func_pred).to(dtype_hi))
+                    zk1 = z0 + 1/gamma_beta * (zk1 + (eta_k1_k1 * f_func_pred.to(dtype_hi)))
 
                 zt[k+1] = zk1.to(dtype_low)
                     
