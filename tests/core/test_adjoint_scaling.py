@@ -86,7 +86,7 @@ class PolynomialDampedODE(nn.Module):
         grads = torch.autograd.grad(loss, (y0d, a, b, c))
         return y_T.detach().to(device), *[g.detach().to(device) for g in grads]
 
-def solve_ode(model, y0, t, method='l1', working_dtype=torch.float32, scaler = DynamicScaler):
+def solve_ode(model, y0, t, working_dtype=torch.float32, scaler = DynamicScaler):
     with autocast(device_type='cuda', dtype=working_dtype):
         # Handle case where scaler is False (no scaling) vs DynamicScaler class
         if scaler is False:
@@ -94,11 +94,11 @@ def solve_ode(model, y0, t, method='l1', working_dtype=torch.float32, scaler = D
         else:
             loss_scaler = scaler(working_dtype)
         # Pin beta explicitly for analytic consistency even if external env has old defaults.
-        return odeint(model, y0, t, method=method, beta=1.0, loss_scaler=loss_scaler)
+        return odeint(model, y0, t, method='l1', beta=1.0, loss_scaler=loss_scaler)
 
 
 # Helper function to compute gradients with respect to y0 and model params.
-def compute_gradients(model, y0, t, method,  working_dtype=torch.float32, scaler=DynamicScaler):
+def compute_gradients(model, y0, t, working_dtype=torch.float32, scaler=DynamicScaler):
     # Ensure y0 is a leaf tensor requiring gradient.
     y0 = y0.detach().clone().requires_grad_(True)
 
@@ -109,7 +109,7 @@ def compute_gradients(model, y0, t, method,  working_dtype=torch.float32, scaler
             y0.grad = None
             model.a.grad = model.b.grad = model.c.grad = None
             # forward
-            sol = solve_ode(model, y0, t, method=method,
+            sol = solve_ode(model, y0, t,
                             working_dtype=working_dtype, scaler=scaler)
             loss = 0.5 * sol[-1].pow(2).sum()
 
@@ -151,7 +151,7 @@ class TestGradientPrecisionComparison(unittest.TestCase):
         self.dim = 1  # Scalar state dimension for analytic reference.
         self.model = PolynomialDampedODE().to(self.device)
         # Create a time grid from 0 to 3.
-        self.t = torch.linspace(0., self.model.T, 400, device=self.device)
+        self.t = torch.linspace(0., self.model.T, 100, device=self.device)
         # Initial state near fp16 max normal.
         self.y0 = torch.tensor([65504.0/180], device=self.device)  # fp16 max normal
         # Create the ODE model.
@@ -168,7 +168,7 @@ class TestGradientPrecisionComparison(unittest.TestCase):
         for wdtype in [torch.float32, torch.float16, torch.bfloat16]:
             try:
                 sol_no_grad = solve_ode(self.model, self.y0, self.t,
-                                        method='l1', working_dtype=wdtype)
+                                        working_dtype=wdtype)
                 err = torch.linalg.norm(sol_no_grad[-1] - y_T_analytic) / torch.linalg.norm(y_T_analytic)
                 state_errors[str(wdtype)] = f"{err:.8e}"
             except (RuntimeError, ValueError) as e:
@@ -180,7 +180,7 @@ class TestGradientPrecisionComparison(unittest.TestCase):
             for (scaler, name_str) in zip([False, DynamicScaler], scalers_str):
 
                 sol, grad_y0_num, grad_a_num, grad_b_num, grad_c_num = compute_gradients(
-                    self.model, self.y0, self.t, method='l1',
+                    self.model, self.y0, self.t,
                     working_dtype=working_dtype, scaler=scaler)
 
                 rel_err_state = state_errors[str(working_dtype)]
@@ -235,11 +235,11 @@ class TestGradientPrecisionComparison(unittest.TestCase):
             plt.semilogy(t_cpu, y_analytic.abs(), label='analytic')
             # fp32 numerical
             sol_fp32 = solve_ode(self.model, self.y0, self.t,
-                                 method='l1', working_dtype=torch.float32)
+                                 working_dtype=torch.float32)
             plt.semilogy(t_cpu, sol_fp32.abs().cpu(), '--', label='l1‑fp32')
             # fp16 numerical
             sol_fp16 = solve_ode(self.model, self.y0, self.t,
-                                 method='l1', working_dtype=torch.float16,
+                                 working_dtype=torch.float16,
                                  scaler=DynamicScaler)
             plt.semilogy(t_cpu, sol_fp16.abs().cpu(), ':', label='l1‑fp16‑scaled')
             # horizontal dashed lines for fp16 limits
