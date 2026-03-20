@@ -99,6 +99,47 @@ def _run_case(
         }
 
 
+def _reference_fd(
+    device: torch.device,
+    lam: float,
+    beta: float,
+    t: torch.Tensor,
+    y0_value: float,
+    eps_rel: float = 1e-6,
+) -> Dict[str, Any]:
+    """Compute a robust float64 reference using forward solves and finite difference."""
+    model = FractionalLinearODE(lam=lam, param_dtype=torch.float64).to(device)
+    y0 = torch.tensor([y0_value], device=device, dtype=torch.float64)
+    dy0 = max(abs(y0_value) * eps_rel, eps_rel)
+
+    try:
+        y_plus = torch.tensor([y0_value + dy0], device=device, dtype=torch.float64)
+        y_minus = torch.tensor([y0_value - dy0], device=device, dtype=torch.float64)
+
+        sol0 = _solve_fractional_l1(model, y0, t, beta, torch.float64, False)
+        solp = _solve_fractional_l1(model, y_plus, t, beta, torch.float64, False)
+        solm = _solve_fractional_l1(model, y_minus, t, beta, torch.float64, False)
+
+        yT0 = sol0[-1].detach().to(torch.float64)
+        d_yT_dy0 = (solp[-1].detach().to(torch.float64) - solm[-1].detach().to(torch.float64)) / (2.0 * dy0)
+        grad_y0 = yT0 * d_yT_dy0  # d/dy0 [0.5 * y(T)^2]
+
+        is_finite = bool(torch.isfinite(yT0).all() and torch.isfinite(grad_y0).all())
+        return {
+            'ok': is_finite,
+            'yT': yT0,
+            'grad_y0': grad_y0,
+            'error': None if is_finite else 'non-finite reference outputs',
+        }
+    except (RuntimeError, ValueError) as exc:
+        return {
+            'ok': False,
+            'yT': None,
+            'grad_y0': None,
+            'error': str(exc),
+        }
+
+
 class TestFractionalAdjointScalingCrossDtype(unittest.TestCase):
     def setUp(self) -> None:
         if not torch.cuda.is_available():
@@ -113,15 +154,13 @@ class TestFractionalAdjointScalingCrossDtype(unittest.TestCase):
         self.t64 = torch.linspace(0.0, self.T, self.n_time, device=self.device, dtype=torch.float64)
 
     def test_fractional_cross_dtype_behavior(self) -> None:
-        # High-precision numerical reference using the same L1 fractional pipeline.
-        ref = _run_case(
+        # High-precision numerical reference via forward-only finite difference.
+        ref = _reference_fd(
             device=self.device,
             lam=self.lam,
             beta=self.beta,
             t=self.t64,
             y0_value=self.y0_value,
-            work_dtype=torch.float64,
-            scaler=False,
         )
         self.assertTrue(ref['ok'], f"Reference run failed: {ref['error']}")
 
