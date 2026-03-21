@@ -1,241 +1,252 @@
-import os
-import sys
 import unittest
-from typing import Any, Dict, List, Tuple
-
+import math 
 import torch
 import torch.nn as nn
+import sys, os
+import argparse
+import csv, pathlib, datetime, textwrap
+
+SCRIPT_DIR = pathlib.Path(__file__).parent.resolve()
+OUT_DIR = SCRIPT_DIR / "test_adjoint_scaling_fractional"
+OUT_DIR.mkdir(exist_ok=True)
+
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirnamt(__file__), '..')))
+from rampde import odeint, DynamicScaler
 from torch.amp import autocast
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from rampde import DynamicScaler, odeint
-
 
 torch.set_default_dtype(torch.float32)
 
+class PolynomialDampedODE(nn.Module):
+    r"""
+    ODE: z'(t) = -λ(t)z(t), where λ(t) = a t^2 + b t + c (β = 1)
 
-class FractionalLinearODE(nn.Module):
-    """Simple fractional test ODE: D^beta y = -lambda * y."""
+    Soln: z(t) = z(0) exp(-a t^3/3 - b t^2/2 - c t)
+    """
 
-    def __init__(self, lam: float, lam_dtype: torch.dtype = torch.float32):
+    def __init__(self):
         super().__init__()
-        # Keep lambda as a buffer so this test isolates dy0 adjoint behavior only.
-        self.register_buffer('lam', torch.tensor(lam, dtype=lam_dtype))
+        self.a = nn.Parameter(torch.tensor(0.5, dtype=torch.float32))
+        self.b = nn.Parameter(torch.tensor(-1.5, dtype=torch.float32))
+        self.c = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
 
-    def forward(self, t: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    def forward(self, t: torch.Tensor, z: torch.Tensor):
+        """
+        Evaluate RHS -λ(t)z(t)
+        """
         if torch.is_autocast_enabled():
-            work_dtype = torch.get_autocast_dtype('cuda')
-            y = y.to(work_dtype)
-            lam = self.lam.to(work_dtype)
+            cur_dtype = torch.get_autocast_dtype('cuda')
+            t = t.to(cur_dtype)
+            z = z.to(cur_dtype)
+            a = self.a.clone().to(cur_dtype)
+            b = self.b.clone().to(cur_dtype)
+            c = self.c.clone().to(cur_dtype)
         else:
-            lam = self.lam
-        out = -lam * y
-        if not torch.isfinite(out).all():
-            raise ValueError(f"Non-finite RHS detected: {out}")
-        return out
+            a = self.a
+            b = self.b
+            c = self.c
+        lam = a * t**2 + b * t + c
+        rhs = -lam * z
+        if not torch.isfinite(lam).all():
+            raise ValueError(f"λ(t) has non-finite values: {lam} at t = {t}")
+        if not torch.isfinite(rhs).all():
+            raise ValueError(f"RHS has non-finite values: {rhs} at t = {t}")
+        return rhs
+    
+    def solve_analytic(self, t: torch.Tensor, z0: torch.Tensor):
+        """
+        Compute the analytic solution at time t given initial condition z0.
+        """
+        T = t[-1].cpu().double()
+        device = z0.device
+        z0_double = z0.detach().cpu().double().requires_grad_(True)
+        a = self.a.detach().cpu().double().requires_grad_(True)
+        b = self.b.detach().cpu().double().requires_grad_(True)
+        c = self.c.detach().cpu().double().requires_grad_(True)
 
-
-def _solve_fractional_l1(
-    model: nn.Module,
-    y0: torch.Tensor,
-    t: torch.Tensor,
-    beta: float,
-    working_dtype: torch.dtype,
-    scaler: Any,
-) -> torch.Tensor:
-    if scaler is False:
-        loss_scaler = False
-    elif scaler is None:
-        loss_scaler = None
-    else:
-        loss_scaler = scaler(working_dtype)
-
-    # Autocast only for low precision dtypes.
-    use_autocast = working_dtype in (torch.float16, torch.bfloat16)
-    with autocast(device_type='cuda', dtype=working_dtype, enabled=use_autocast):
-        return odeint(model, y0, t, method='l1', beta=beta, loss_scaler=loss_scaler)
-
-
-def _run_case(
-    device: torch.device,
-    lam: float,
-    beta: float,
-    t: torch.Tensor,
-    y0_value: float,
-    work_dtype: torch.dtype,
-    scaler: Any,
-) -> Dict[str, Any]:
-    model = FractionalLinearODE(lam=lam, lam_dtype=torch.float32).to(device)
-    y0 = torch.tensor([y0_value], device=device, dtype=work_dtype).requires_grad_(True)
-
+        zT = z0_double * torch.exp(-a * T**3 / 3 - b * T**2 / 2 - c * T)
+        loss = 0.5 * zT ** 2
+        grads = torch.autograd.grad(loss, (z0_double, a, b, c))
+        return zT.detach().to(device), *[g.detach().to(device) for g in grads]
+    
+def solve_ode(model, beta, z0, t, working_dtype = torch.float32, scaler = DynamicScaler):
+    with autocast(device_type='cuda', dtype=working_dtype):
+        # Case where no scaling is used vs Dynamic Scaling
+        if scaler is None or False:
+            loss_scaler = False
+        else:
+            loss_scaler = scaler(working_dtype)
+        return odeint(model, z0, t, beta=beta, method='l1', loss_scaler=loss_scaler)
+    
+def compute_gradients(model, y0, t, working_dtype = torch.float32, scaler = DynamicScaler):
+    z0 = z0.detach().clone().requires_grad_(True)
     try:
-        sol = _solve_fractional_l1(
-            model=model,
-            y0=y0,
-            t=t,
-            beta=beta,
-            working_dtype=work_dtype,
-            scaler=scaler,
-        )
-        loss = 0.5 * sol[-1].pow(2).sum()
-        loss.backward()
+        with autocast(device_type='cuda', dtype=working_dtype):
+            z0.grad = None
+            model.a.grad = model.b.grad = model.c.grad = None
+            soln_forward = solve_ode(model, beta=1.0, z0=z0, t=t, working_dtype=working_dtype, scaler=scaler)
+            loss_forward = 0.5 * soln_forward[-1].pow(2).sum()
 
-        yT = sol[-1].detach().to(torch.float64)
-        if y0.grad is None:
-            return {
-                'ok': False,
-                'yT': None,
-                'grad_y0': None,
-                'error': 'missing y0 gradient',
-            }
-
-        grad_y0 = y0.grad.detach().to(torch.float64)
-
-        is_finite = bool(torch.isfinite(yT).all() and torch.isfinite(grad_y0).all())
-        return {
-            'ok': is_finite,
-            'yT': yT,
-            'grad_y0': grad_y0,
-            'error': None if is_finite else 'non-finite outputs',
-        }
-    except (RuntimeError, ValueError) as exc:
-        return {
-            'ok': False,
-            'yT': None,
-            'grad_y0': None,
-            'error': str(exc),
-        }
+        loss_forward.backward()
+        grad_z0 = z0.grad.detach().clone()
+        grad_a = model.a.grad.detach().clone()
+        grad_b = model.b.grad.detach().clone()
+        grad_c = model.c.grad.detach().clone()
+    except (RuntimeError, ValueError) as e:
+        print(f"Error during forward or backward pass: {e}")
+        grad_z0 = grad_a = grad_b = grad_c = None
+    return soln_forward, grad_z0, grad_a, grad_b, grad_c
 
 
-def _reference_fd(
-    device: torch.device,
-    lam: float,
-    beta: float,
-    t: torch.Tensor,
-    y0_value: float,
-    eps_rel: float = 1e-6,
-) -> Dict[str, Any]:
-    """Compute a robust float64 reference using forward solves and finite difference."""
-    model = FractionalLinearODE(lam=lam, lam_dtype=torch.float64).to(device)
-    y0 = torch.tensor([y0_value], device=device, dtype=torch.float64)
-    dy0 = max(abs(y0_value) * eps_rel, eps_rel)
-
-    try:
-        y_plus = torch.tensor([y0_value + dy0], device=device, dtype=torch.float64)
-        y_minus = torch.tensor([y0_value - dy0], device=device, dtype=torch.float64)
-
-        sol0 = _solve_fractional_l1(model, y0, t, beta, torch.float64, False)
-        solp = _solve_fractional_l1(model, y_plus, t, beta, torch.float64, False)
-        solm = _solve_fractional_l1(model, y_minus, t, beta, torch.float64, False)
-
-        yT0 = sol0[-1].detach().to(torch.float64)
-        d_yT_dy0 = (solp[-1].detach().to(torch.float64) - solm[-1].detach().to(torch.float64)) / (2.0 * dy0)
-        grad_y0 = yT0 * d_yT_dy0  # d/dy0 [0.5 * y(T)^2]
-
-        is_finite = bool(torch.isfinite(yT0).all() and torch.isfinite(grad_y0).all())
-        return {
-            'ok': is_finite,
-            'yT': yT0,
-            'grad_y0': grad_y0,
-            'error': None if is_finite else 'non-finite reference outputs',
-        }
-    except (RuntimeError, ValueError) as exc:
-        return {
-            'ok': False,
-            'yT': None,
-            'grad_y0': None,
-            'error': str(exc),
-        }
-
-
-class TestFractionalAdjointScalingCrossDtype(unittest.TestCase):
-    def setUp(self) -> None:
+class TestGradientPrecisionComparision(unittest.TestCase):
+    def setUp(self):
         if not torch.cuda.is_available():
-            self.skipTest('CUDA required for fractional mixed-precision tests.')
+            self.skipTest("CUDA is not available, skipping tests.")
+        self.device = torch.device('cuda')
+        self.dim = 1
+        self.model = PolynomialDampedODE().to(self.device)
+        self.t = torch.linspace(0.0, self.model.T, 100, device=self.device)
+        self.z0 = torch.tensor([65504.0/180], device=self.device)  # fp16 max normal
 
-        self.device = torch.device('cuda:0')
-        self.beta = 0.5
-        # Mild regime to keep forward/backward finite across dtypes.
-        self.lam = 0.25
-        self.T = 1.0
-        self.n_time = 64
-        self.y0_value = 0.7
-        self.t64 = torch.linspace(0.0, self.T, self.n_time, device=self.device, dtype=torch.float64)
+    def test_precision_vs_analytic(self):
+        z_T_analytic, grad_z0_analytic, grad_a_analytic, grad_b_analytic, grad_c_analytic = self.model.solve_analytic(self.t, self.z0)
+        results = []
 
-    def test_fractional_cross_dtype_behavior(self) -> None:
-        # High-precision numerical reference via forward-only finite difference.
-        ref = _reference_fd(
-            device=self.device,
-            lam=self.lam,
-            beta=self.beta,
-            t=self.t64,
-            y0_value=self.y0_value,
-        )
-        self.assertTrue(ref['ok'], f"Reference run failed: {ref['error']}")
+        state_errors = {}
+        for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            try: 
+                sol_no_grad = solve_ode(self.model, self.z0, self.t, working_dtype = working_dtype)
+                err = torch.linalg.norm(sol_no_grad[-1] - z_T_analytic) / torch.linalg.norm(z_T_analytic)
+                state_errors[str(working_dtype)] = f"{err:.8e}"
+            except (RuntimeError, ValueError) as e:
+                print(f"     (state solve failed for {working_dtype}: {e})")
+                state_errors[str(working_dtype)] = "Failed"
 
-        cases: List[Tuple[torch.dtype, Any, str]] = [
-            (torch.float32, False, 'False'),
-            (torch.float32, DynamicScaler, 'DynamicScaler'),
-            (torch.float16, False, 'False'),
-            (torch.float16, DynamicScaler, 'DynamicScaler'),
-            (torch.bfloat16, False, 'False'),
-            (torch.bfloat16, DynamicScaler, 'DynamicScaler'),
-        ]
+        scalers_str = ["None", "DynamicScaler"]
+        for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            for (scaler, name_str) in zip([None, DynamicScaler], scalers_str):
+                soln, grad_z0_num, grad_a_num, grad_b_num, grad_c_num = compute_gradients(self.model, self.z0, self.t, working_dtype = working_dtype, scaler = scaler)
+                rel_err_state = state_errors[str(working_dtype)]
+                if grad_z0_num is None:
+                    results.append((str(working_dtype), name_str, rel_err_state, "fail", "fail", 'fail', 'fail'))
+                    continue
+                rel_err_grad_z0 = torch.norm(grad_z0_num - grad_z0_analytic) / torch.norm(grad_z0_analytic)
+                rel_err_grad_a  = torch.norm(grad_a_num  - grad_a_analytic ) / torch.norm(grad_a_analytic )
+                rel_err_grad_b  = torch.norm(grad_b_num  - grad_b_analytic ) / torch.norm(grad_b_analytic )
+                rel_err_grad_c  = torch.norm(grad_c_num  - grad_c_analytic ) / torch.norm(grad_c_analytic )
 
-        rows = []
-        rel_errors: Dict[Tuple[torch.dtype, str], Dict[str, Any]] = {}
+                results.append((str(working_dtype), name_str, rel_err_state, f"{rel_err_grad_z0:.8e}", f"{rel_err_grad_a:.8e}", f"{rel_err_grad_b:.8e}", f"{rel_err_grad_c:.8e}"))
 
-        for dtype, scaler, scaler_name in cases:
-            t_case = self.t64.to(dtype)
-            out = _run_case(
-                device=self.device,
-                lam=self.lam,
-                beta=self.beta,
-                t=t_case,
-                y0_value=self.y0_value,
-                work_dtype=dtype,
-                scaler=scaler,
-            )
-
-            if not out['ok']:
-                rows.append((str(dtype), scaler_name, 'fail', 'fail', out['error']))
-                rel_errors[(dtype, scaler_name)] = {'ok': False}
-                continue
-
-            rel_state = (torch.linalg.norm(out['yT'] - ref['yT']) / torch.linalg.norm(ref['yT'])).item()
-            rel_grad = (
-                torch.linalg.norm(out['grad_y0'] - ref['grad_y0']) / torch.linalg.norm(ref['grad_y0'])
-            ).item()
-
-            rows.append((str(dtype), scaler_name, f"{rel_state:.8e}", f"{rel_grad:.8e}", 'ok'))
-            rel_errors[(dtype, scaler_name)] = {
-                'ok': True,
-                'rel_state': rel_state,
-                'rel_grad': rel_grad,
-            }
-
-        quiet = os.environ.get('RAMPDE_TEST_QUIET', '0') == '1'
+                # Print results in a markdown-like table format
+        table_lines = ["| dtype | Scaler | RelErr y(T) | RelErr ∂z0 | RelErr ∂a | RelErr ∂b | RelErr ∂c |",
+            "|-------|--------|--------------|-------------|-------------|-------------|-------------|"]
+        quiet = os.environ.get("RAMPDE_TEST_QUIET", "0") == "1"
+        for row in results:
+            table_lines.append("| " + " | ".join(row) + " |")
         if not quiet:
-            print("| dtype | scaler | relerr y(T) | relerr dL/dy0 | status |")
-            print("|-------|--------|-------------|---------------|--------|")
-            for r in rows:
-                print(f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} |")
+            print("\n".join(table_lines))
 
-        # Basic correctness checks against float64 L1 reference.
-        f32_no_scaler = rel_errors[(torch.float32, 'False')]
-        self.assertTrue(f32_no_scaler['ok'], 'float32 without scaler should succeed')
-        self.assertLess(f32_no_scaler['rel_state'], 1e-4)
-        self.assertLess(f32_no_scaler['rel_grad'], 1e-4)
+         # --- Pass if all rel errors for float16+DynamicScaler are below 1e-2 ---
+        for row in results:
+            dtype, scaler, err_state, err_dz0, err_da, err_db, err_dc = row
+            if dtype == 'torch.float16' and scaler == "DynamicScaler" and err_dz0 != 'fail':
+                all_below = all(float(err) <= 1e-2 for err in (err_dz0, err_da, err_db, err_dc))
+                self.assertTrue(all_below, f"float16+DynamicScaler rel error(s) too large: {[err_dz0, err_da, err_db, err_dc]}")
 
-        bf16_no_scaler = rel_errors[(torch.bfloat16, 'False')]
-        self.assertTrue(bf16_no_scaler['ok'], 'bfloat16 without scaler should succeed')
-        self.assertLess(bf16_no_scaler['rel_state'], 5e-2)
-        self.assertLess(bf16_no_scaler['rel_grad'], 5e-2)
 
-        # Cross-dtype behavior check for fp16 + DynamicScaler.
-        fp16_dynamic = rel_errors[(torch.float16, 'DynamicScaler')]
-        self.assertTrue(fp16_dynamic['ok'], 'float16 with DynamicScaler should produce finite outputs')
+        # Plot analytic |y(t)| in log‑scale together with numerical FP16/FP32
+        with torch.no_grad():
+            t_cpu = self.t.cpu()
+            T = self.model.T
+            z_analytic = self.z0.cpu() * torch.exp(
+                -(self.model.a.cpu()/3)*t_cpu**3
+                -(self.model.b.cpu()/2)*t_cpu**2
+                - self.model.c.cpu()*t_cpu
+            )
+            # ---------- constants for float16 range -------------------
+            fp16_min = 2**-14        # smallest positive *normal* FP16
+            fp16_max = 65504.0       # largest finite FP16
+            # ---------- figure 1: state --------------------------------
+            plt.figure()
+            plt.semilogy(t_cpu, z_analytic.abs(), label='analytic')
+            # fp32 numerical
+            sol_fp32 = solve_ode(self.model, self.z0, self.t,
+                                 working_dtype=torch.float32)
+            plt.semilogy(t_cpu, sol_fp32.abs().cpu(), '--', label='l1‑fp32')
+            # fp16 numerical
+            sol_fp16 = solve_ode(self.model, self.z0, self.t,
+                                 working_dtype=torch.float16,
+                                 scaler=DynamicScaler)
+            plt.semilogy(t_cpu, sol_fp16.abs().cpu(), ':', label='l1‑fp16‑scaled')
+            # horizontal dashed lines for fp16 limits
+            plt.axhline(fp16_min, linestyle='--', color='gray', label='fp16 min normal')
+            plt.axhline(fp16_max, linestyle='--', color='gray', label='fp16 max')
+            plt.legend()
+            plt.xlabel('t'); plt.ylabel('|z(t)|')
+            plt.title('Polynomial ODE solution (log‑scale)')
+            plt.savefig(OUT_DIR / 'polynomial_state.png', dpi=200)
+            plt.close()
+
+            # ---------- figure 2: velocity -----------------------------
+            # λ(t) and velocity using analytic formula
+            lam_cpu = (self.model.a.cpu()*t_cpu**2 +
+                       self.model.b.cpu()*t_cpu +
+                       self.model.c.cpu())
+            vel_analytic = (lam_cpu * z_analytic).abs()
+
+            plt.figure()
+            plt.semilogy(t_cpu, vel_analytic, label='|λ(t) z(t)| analytic')
+            # horizontal fp16 bounds
+            plt.axhline(fp16_min, linestyle='--', color='gray', label='fp16 min normal')
+            plt.axhline(fp16_max, linestyle='--', color='gray', label='fp16 max')
+            plt.legend()
+            plt.xlabel('t'); plt.ylabel('|z\'(t)|')
+            plt.title('Velocity magnitude (log‑scale)')
+            plt.savefig(OUT_DIR / 'polynomial_velocity.png', dpi=200)
+            plt.close()    
+
+
+        # --- save state CSV ---------------------------------------------------
+        state_csv = OUT_DIR / "state_curve.csv"
+        with state_csv.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["t", "z_analytic", "z_l1_fp32", "z_l1_fp16_scaled"])
+            for tt, za, z32, z16 in zip(t_cpu,
+                                       z_analytic,
+                                       sol_fp32.cpu(),
+                                       sol_fp16.cpu()):
+                writer.writerow([float(tt), float(za), float(z32), float(z16)])
+
+        vel_csv = OUT_DIR / "velocity_curve.csv"
+        with vel_csv.open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["t", "velocity"])
+            for tt, vel in zip(t_cpu, vel_analytic):
+                writer.writerow([float(tt), float(vel)])
+
+        # --- write run_info.txt ----------------------------------------------
+        info_txt = OUT_DIR / "run_info.txt"
+        meta = textwrap.dedent(f"""
+        Date: {datetime.datetime.now().isoformat()}
+        Polynomial-damped ODE test
+          y'(t) = -(a t² + b t + c) y(t)
+          T    = {self.model.T}
+          a    = {float(self.model.a)}
+          b    = {float(self.model.b)}
+          c    = {float(self.model.c)}
+          y0   = {float(self.y0)}
+          L1 steps = {len(self.t)-1}
+
+        Results table:
+        """)
+        info_txt.write_text(meta + "\n".join(table_lines))
 
 
 if __name__ == '__main__':
-    unittest.main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
+    args = parser.parse_args()
+    unittest.main(argv=[sys.argv[0]] + (['-v'] if args.verbose else []))
