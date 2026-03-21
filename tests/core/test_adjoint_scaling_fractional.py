@@ -14,7 +14,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirnamt(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from rampde import odeint, DynamicScaler
 from torch.amp import autocast
 
@@ -29,6 +29,7 @@ class PolynomialDampedODE(nn.Module):
 
     def __init__(self):
         super().__init__()
+        self.T = 3.0
         self.a = nn.Parameter(torch.tensor(0.5, dtype=torch.float32))
         self.b = nn.Parameter(torch.tensor(-1.5, dtype=torch.float32))
         self.c = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))
@@ -81,7 +82,7 @@ def solve_ode(model, beta, z0, t, working_dtype = torch.float32, scaler = Dynami
             loss_scaler = scaler(working_dtype)
         return odeint(model, z0, t, beta=beta, method='l1', loss_scaler=loss_scaler)
     
-def compute_gradients(model, y0, t, working_dtype = torch.float32, scaler = DynamicScaler):
+def compute_gradients(model, z0, t, working_dtype = torch.float32, scaler = DynamicScaler):
     z0 = z0.detach().clone().requires_grad_(True)
     try:
         with autocast(device_type='cuda', dtype=working_dtype):
@@ -118,7 +119,7 @@ class TestGradientPrecisionComparision(unittest.TestCase):
         state_errors = {}
         for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
             try: 
-                sol_no_grad = solve_ode(self.model, self.z0, self.t, working_dtype = working_dtype)
+                sol_no_grad = solve_ode(self.model, beta = 1.0, z0 = self.z0, t = self.t, working_dtype = working_dtype)
                 err = torch.linalg.norm(sol_no_grad[-1] - z_T_analytic) / torch.linalg.norm(z_T_analytic)
                 state_errors[str(working_dtype)] = f"{err:.8e}"
             except (RuntimeError, ValueError) as e:
@@ -173,11 +174,11 @@ class TestGradientPrecisionComparision(unittest.TestCase):
             plt.figure()
             plt.semilogy(t_cpu, z_analytic.abs(), label='analytic')
             # fp32 numerical
-            sol_fp32 = solve_ode(self.model, self.z0, self.t,
+            sol_fp32 = solve_ode(self.model, beta = 1.0, z0 = self.z0, t = self.t, 
                                  working_dtype=torch.float32)
             plt.semilogy(t_cpu, sol_fp32.abs().cpu(), '--', label='l1‑fp32')
             # fp16 numerical
-            sol_fp16 = solve_ode(self.model, self.z0, self.t,
+            sol_fp16 = solve_ode(self.model, beta = 1.0, z0 = self.z0, t = self.t,
                                  working_dtype=torch.float16,
                                  scaler=DynamicScaler)
             plt.semilogy(t_cpu, sol_fp16.abs().cpu(), ':', label='l1‑fp16‑scaled')
@@ -232,12 +233,12 @@ class TestGradientPrecisionComparision(unittest.TestCase):
         meta = textwrap.dedent(f"""
         Date: {datetime.datetime.now().isoformat()}
         Polynomial-damped ODE test
-          y'(t) = -(a t² + b t + c) y(t)
+          z'(t) = -(a t² + b t + c) z(t)
           T    = {self.model.T}
           a    = {float(self.model.a)}
           b    = {float(self.model.b)}
           c    = {float(self.model.c)}
-          y0   = {float(self.y0)}
+          z0   = {float(self.z0)}
           L1 steps = {len(self.t)-1}
 
         Results table:

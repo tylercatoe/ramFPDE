@@ -9,7 +9,7 @@ from typing import Union, Optional, Tuple, Literal, TypeVar, Callable, Type, Any
 import torch
 from .increment import INCREMENTS, get_increment_function
 from .fixed_grid_unscaled import FixedGridODESolverUnscaled
-from .fixed_grid_dynamic import FixedGridODESolverDynamic
+from .fixed_grid_dynamic_uniform import FixedGridODESolverDynamicUniform
 from .fixed_grid_unscaled_safe import FixedGridODESolverUnscaledSafe
 from .loss_scalers import DynamicScaler
 
