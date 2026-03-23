@@ -64,6 +64,9 @@ class FixedGridODESolverBase(torch.autograd.Function):
             zt: Solution tensor at all time points
         """
         with torch.no_grad():
+            if beta == 1.0:
+                beta = 1.0 - 0.0001
+
             # Determine precision levels
             dtype_hi = z0.dtype
             dtype_low = torch.get_autocast_dtype('cuda') if torch.is_autocast_enabled() else dtype_hi

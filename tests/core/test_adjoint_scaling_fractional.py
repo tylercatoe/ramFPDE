@@ -195,7 +195,7 @@ class TestGradientPrecisionComparision(unittest.TestCase):
         found_fp16_scaled_row = False
         found_fp16_scaled_milestone_row = False
         for row in results:
-            dtype, scaler, z0_tag, err_state, err_dz0, err_da, err_db, err_dc = row
+            z0_tag, dtype, scaler, err_state, err_dz0, err_da, err_db, err_dc = row
             if dtype == 'torch.float16' and scaler == "DynamicScaler(tuned)":
                 found_fp16_scaled_row = True
                 if z0_tag == "z0/2":

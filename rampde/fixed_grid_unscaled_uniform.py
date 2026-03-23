@@ -64,6 +64,9 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         ode_func = ctx.ode_func
         t = ctx.t
         dtype_hi = ctx.dtype_hi
+
+        if beta == 1.0:
+            beta = 1.0 - 0.0001  # Avoid edge case in Gamma function for beta=1
         
         # Determine precision
         dtype_low = torch.get_autocast_dtype('cuda') if torch.is_autocast_enabled() else dtype_hi
