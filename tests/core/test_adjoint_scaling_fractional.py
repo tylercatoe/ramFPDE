@@ -87,7 +87,7 @@ def make_tuned_dynamic_scaler(dtype_low: torch.dtype) -> DynamicScaler:
     """Tuned profile for hard fp16 adjoint-stability stress tests."""
     return DynamicScaler(
         dtype_low=dtype_low,
-        target_factor=256.0,
+        target_factor=128.0,
         increase_factor=1.25,
         decrease_factor=0.125,
         max_attempts=150,
@@ -174,7 +174,7 @@ class TestGradientPrecisionComparision(unittest.TestCase):
                     ))
 
         # Print results as a fixed-width table for easier terminal readability.
-        headers = ["Init", "dtype", "Scaler", "RelErr y(T)", "RelErr ∂z0", "RelErr ∂a", "RelErr ∂b", "RelErr ∂c"]
+        headers = ["Init", "dtype", "Scaler", "RelErr z(T)", "RelErr ∂z0", "RelErr ∂a", "RelErr ∂b", "RelErr ∂c"]
         table_rows = [list(row) for row in results]
         col_widths = [
             max(len(headers[i]), max(len(r[i]) for r in table_rows) if table_rows else 0)
