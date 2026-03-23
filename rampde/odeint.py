@@ -90,7 +90,7 @@ def _select_ode_solver(
     
     if isinstance(loss_scaler, DynamicScaler):
         # Dynamic scaling required - use scaling loop variant
-        return FixedGridODESolverDynamic, loss_scaler
+        return FixedGridODESolverDynamicUniform, loss_scaler
     
     elif loss_scaler is None:
         if precision in [torch.float32, torch.bfloat16, torch.float64]:
