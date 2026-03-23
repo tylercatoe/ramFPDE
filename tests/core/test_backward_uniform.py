@@ -13,7 +13,7 @@ For the manufactured scalar problem
 the implemented terminal-loss sensitivity convention is
 
     dL/dz0    = dL/dz(T)
-    dL/dtheta = -T * dL/dz(T),  where T = t[-1] - t[0].
+    dL/dtheta = T * dL/dz(T),  where T = t[-1] - t[0].
 
 The directional tests verify autograd gradients against this rule.
 """
@@ -111,7 +111,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         self.jitter_rel = 0.20 if _IS_DYNAMIC else 0.05
         self.beta = torch.tensor(0.6, dtype=self.dtype, device=self.device)
         self.t = torch.linspace(0.0, 1.0, 192, dtype=self.dtype, device=self.device)
-        # T = t[-1] - t[0] in dL/dtheta = -T * dL/dz(T).
+        # T = t[-1] - t[0] in dL/dtheta = T * dL/dz(T).
         self.total_time = (self.t[-1] - self.t[0]).item()
 
     def _directional_pair(self, theta0: float, z00: float, v_z0: float, v_theta: float, loss_kind: str):
@@ -142,9 +142,9 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
 
         # Directional derivative from returned gradients: Jv_auto = <grad, v>.
         jv_auto = grad_z0 * v_z0 + grad_theta * v_theta
-        # Expected architecture-2 directional rule:
-        # dL/dz0 = dL/dz(T), dL/dtheta = -T * dL/dz(T).
-        jv_expected = dL_dzT * v_z0 + (-self.total_time * dL_dzT) * v_theta
+        # Expected directional rule:
+        # dL/dz0 = dL/dz(T), dL/dtheta = T * dL/dz(T).
+        jv_expected = dL_dzT * v_z0 + (self.total_time * dL_dzT) * v_theta
         return jv_auto, jv_expected
 
     def _terminal_grads_for_grid_tanh(self, N: int, theta0: float, z00: float, beta_val: float, loss_kind: str):
