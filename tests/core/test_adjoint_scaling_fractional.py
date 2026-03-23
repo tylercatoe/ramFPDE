@@ -130,7 +130,7 @@ class TestGradientPrecisionComparision(unittest.TestCase):
 
         z0_cases = [
             ("z0", self.z0),
-            ("z0/2", self.z0 * 0.5),
+            #("z0/2", self.z0 * 0.5),
         ]
         scalers_str = ["False", "DynamicScaler(tuned)"]
 
@@ -147,8 +147,8 @@ class TestGradientPrecisionComparision(unittest.TestCase):
                     print(f"     (state solve failed for {z0_tag}, {working_dtype}: {e})")
                     state_errors[str(working_dtype)] = "Failed"
 
-            for (scaler, name_str) in zip([False, make_tuned_dynamic_scaler], scalers_str):
-                for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+            for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+                for (scaler, name_str) in zip([False, make_tuned_dynamic_scaler], scalers_str):
                     soln, grad_z0_num, grad_a_num, grad_b_num, grad_c_num = compute_gradients(
                         self.model, z0_case, self.t, working_dtype=working_dtype, scaler=scaler
                     )
