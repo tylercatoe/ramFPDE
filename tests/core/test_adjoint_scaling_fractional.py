@@ -173,12 +173,21 @@ class TestGradientPrecisionComparision(unittest.TestCase):
                         f"{rel_err_grad_c:.8e}",
                     ))
 
-                # Print results in a markdown-like table format
-        table_lines = ["| Init | dtype | Scaler | RelErr y(T) | RelErr ∂z0 | RelErr ∂a | RelErr ∂b | RelErr ∂c |",
-            "|------|-------|--------|--------------|-------------|-------------|-------------|-------------|"]
+        # Print results as a fixed-width table for easier terminal readability.
+        headers = ["Init", "dtype", "Scaler", "RelErr y(T)", "RelErr ∂z0", "RelErr ∂a", "RelErr ∂b", "RelErr ∂c"]
+        table_rows = [list(row) for row in results]
+        col_widths = [
+            max(len(headers[i]), max(len(r[i]) for r in table_rows) if table_rows else 0)
+            for i in range(len(headers))
+        ]
+
+        def _format_row(vals):
+            return " | ".join(vals[i].ljust(col_widths[i]) for i in range(len(vals)))
+
+        separator = "-+-".join("-" * w for w in col_widths)
+        table_lines = [_format_row(headers), separator]
+        table_lines.extend(_format_row(row) for row in table_rows)
         quiet = os.environ.get("RAMPDE_TEST_QUIET", "0") == "1"
-        for row in results:
-            table_lines.append("| " + " | ".join(row) + " |")
         if not quiet:
             print("\n".join(table_lines))
 
