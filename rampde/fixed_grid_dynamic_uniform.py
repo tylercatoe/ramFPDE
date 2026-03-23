@@ -191,7 +191,7 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                                     for d, p in zip(grads, params)]
 
                     trap_updates = [0.5 * h / scaler.S * (d_k.to(dtype_hi) + d_km1.to(dtype_hi)) for d_k, d_km1 in zip(dparams_k, dparams_km1)]
-                    torch._foreach_sub_(grad_theta, trap_updates)
+                    torch._foreach_add_(grad_theta, trap_updates)
 
                 # Check for overflow in accumulated gradients with enhanced error reporting
                 if _is_any_infinite((da, grad_theta)):

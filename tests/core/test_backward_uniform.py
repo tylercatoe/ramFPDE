@@ -254,7 +254,7 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         grad_theta = func.theta.grad.item()
 
         err_z0 = abs(grad_z0 - dL_dzT)
-        err_theta = abs(grad_theta - (-total_time * dL_dzT))
+        err_theta = abs(grad_theta - (total_time * dL_dzT))
         return err_z0, err_theta
     
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 discrete-sensitivity tests")

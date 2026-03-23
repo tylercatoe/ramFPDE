@@ -145,11 +145,11 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
                                 for d, p in zip(grads, params)]
                 
                 trap_updates = [0.5 * h * (d_k.to(dtype_hi) + d_km1.to(dtype_hi)) for d_k, d_km1 in zip(dparams_k, dparams_km1)]
-                torch._foreach_sub_(grad_theta, trap_updates) 
+                torch._foreach_add_(grad_theta, trap_updates) 
                 
                 # for i, (d_k, d_km1) in enumerate(zip(dparams_k, dparams_km1)):
                 #     trap_update = 0.5 * h * (d_k.to(dtype_hi) + d_km1.to(dtype_hi))
-                #     grad_theta[i].sub_(trap_update.to(grad_theta[i].dtype))
+                #     grad_theta[i].add_(trap_update.to(grad_theta[i].dtype))
         
         # Return gradients for all inputs to forward pass
         # (increment_func, ode_func, z0, beta, t, loss_scaler, *params)

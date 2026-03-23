@@ -158,11 +158,9 @@ class TestGradientPrecisionComparision(unittest.TestCase):
                         continue
 
                     rel_err_grad_z0 = torch.norm(grad_z0_num - grad_z0_analytic) / torch.norm(grad_z0_analytic)
-                    # Uniform L1 backward uses a discrete sensitivity convention for parameters.
-                    # Compare parameter gradients against sign-flipped analytic forward-map grads.
-                    rel_err_grad_a = torch.norm(grad_a_num + grad_a_analytic) / torch.norm(grad_a_analytic)
-                    rel_err_grad_b = torch.norm(grad_b_num + grad_b_analytic) / torch.norm(grad_b_analytic)
-                    rel_err_grad_c = torch.norm(grad_c_num + grad_c_analytic) / torch.norm(grad_c_analytic)
+                    rel_err_grad_a = torch.norm(grad_a_num - grad_a_analytic) / torch.norm(grad_a_analytic)
+                    rel_err_grad_b = torch.norm(grad_b_num - grad_b_analytic) / torch.norm(grad_b_analytic)
+                    rel_err_grad_c = torch.norm(grad_c_num - grad_c_analytic) / torch.norm(grad_c_analytic)
 
                     results.append((
                         z0_tag,
