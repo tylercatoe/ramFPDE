@@ -87,10 +87,10 @@ def make_tuned_dynamic_scaler(dtype_low: torch.dtype) -> DynamicScaler:
     """Tuned profile for hard fp16 adjoint-stability stress tests."""
     return DynamicScaler(
         dtype_low=dtype_low,
-        target_factor=512.0,
-        increase_factor=1.5,
-        decrease_factor=0.25,
-        max_attempts=100,
+        target_factor=256.0,
+        increase_factor=1.25,
+        decrease_factor=0.125,
+        max_attempts=150,
         verbose=False,
     )
     
@@ -126,37 +126,56 @@ class TestGradientPrecisionComparision(unittest.TestCase):
         self.z0 = torch.tensor([65504.0/180], device=self.device)  # fp16 max normal
 
     def test_precision_vs_analytic(self):
-        z_T_analytic, grad_z0_analytic, grad_a_analytic, grad_b_analytic, grad_c_analytic = self.model.solve_analytic(self.t, self.z0)
         results = []
 
-        state_errors = {}
-        for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
-            try: 
-                sol_no_grad = solve_ode(self.model, beta = 1.0, z0 = self.z0, t = self.t, working_dtype = working_dtype)
-                err = torch.linalg.norm(sol_no_grad[-1] - z_T_analytic) / torch.linalg.norm(z_T_analytic)
-                state_errors[str(working_dtype)] = f"{err:.8e}"
-            except (RuntimeError, ValueError) as e:
-                print(f"     (state solve failed for {working_dtype}: {e})")
-                state_errors[str(working_dtype)] = "Failed"
-
+        z0_cases = [
+            ("z0", self.z0),
+            ("z0/2", self.z0 * 0.5),
+        ]
         scalers_str = ["False", "DynamicScaler(tuned)"]
-        for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
-            for (scaler, name_str) in zip([False, make_tuned_dynamic_scaler], scalers_str):
-                soln, grad_z0_num, grad_a_num, grad_b_num, grad_c_num = compute_gradients(self.model, self.z0, self.t, working_dtype = working_dtype, scaler = scaler)
-                rel_err_state = state_errors[str(working_dtype)]
-                if grad_z0_num is None:
-                    results.append((str(working_dtype), name_str, rel_err_state, "fail", "fail", 'fail', 'fail'))
-                    continue
-                rel_err_grad_z0 = torch.norm(grad_z0_num - grad_z0_analytic) / torch.norm(grad_z0_analytic)
-                rel_err_grad_a  = torch.norm(grad_a_num  - grad_a_analytic ) / torch.norm(grad_a_analytic )
-                rel_err_grad_b  = torch.norm(grad_b_num  - grad_b_analytic ) / torch.norm(grad_b_analytic )
-                rel_err_grad_c  = torch.norm(grad_c_num  - grad_c_analytic ) / torch.norm(grad_c_analytic )
 
-                results.append((str(working_dtype), name_str, rel_err_state, f"{rel_err_grad_z0:.8e}", f"{rel_err_grad_a:.8e}", f"{rel_err_grad_b:.8e}", f"{rel_err_grad_c:.8e}"))
+        for z0_tag, z0_case in z0_cases:
+            z_T_analytic, grad_z0_analytic, grad_a_analytic, grad_b_analytic, grad_c_analytic = self.model.solve_analytic(self.t, z0_case)
+
+            state_errors = {}
+            for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+                try:
+                    sol_no_grad = solve_ode(self.model, beta=1.0, z0=z0_case, t=self.t, working_dtype=working_dtype)
+                    err = torch.linalg.norm(sol_no_grad[-1] - z_T_analytic) / torch.linalg.norm(z_T_analytic)
+                    state_errors[str(working_dtype)] = f"{err:.8e}"
+                except (RuntimeError, ValueError) as e:
+                    print(f"     (state solve failed for {z0_tag}, {working_dtype}: {e})")
+                    state_errors[str(working_dtype)] = "Failed"
+
+            for (scaler, name_str) in zip([False, make_tuned_dynamic_scaler], scalers_str):
+                for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
+                    soln, grad_z0_num, grad_a_num, grad_b_num, grad_c_num = compute_gradients(
+                        self.model, z0_case, self.t, working_dtype=working_dtype, scaler=scaler
+                    )
+                    rel_err_state = state_errors[str(working_dtype)]
+                    if grad_z0_num is None:
+                        results.append((z0_tag, str(working_dtype), name_str, rel_err_state, "fail", "fail", "fail", "fail"))
+                        continue
+
+                    rel_err_grad_z0 = torch.norm(grad_z0_num - grad_z0_analytic) / torch.norm(grad_z0_analytic)
+                    rel_err_grad_a = torch.norm(grad_a_num - grad_a_analytic) / torch.norm(grad_a_analytic)
+                    rel_err_grad_b = torch.norm(grad_b_num - grad_b_analytic) / torch.norm(grad_b_analytic)
+                    rel_err_grad_c = torch.norm(grad_c_num - grad_c_analytic) / torch.norm(grad_c_analytic)
+
+                    results.append((
+                        z0_tag,
+                        str(working_dtype),
+                        name_str,
+                        rel_err_state,
+                        f"{rel_err_grad_z0:.8e}",
+                        f"{rel_err_grad_a:.8e}",
+                        f"{rel_err_grad_b:.8e}",
+                        f"{rel_err_grad_c:.8e}",
+                    ))
 
                 # Print results in a markdown-like table format
-        table_lines = ["| dtype | Scaler | RelErr y(T) | RelErr ∂z0 | RelErr ∂a | RelErr ∂b | RelErr ∂c |",
-            "|-------|--------|--------------|-------------|-------------|-------------|-------------|"]
+        table_lines = ["| Init | dtype | Scaler | RelErr y(T) | RelErr ∂z0 | RelErr ∂a | RelErr ∂b | RelErr ∂c |",
+            "|------|-------|--------|--------------|-------------|-------------|-------------|-------------|"]
         quiet = os.environ.get("RAMPDE_TEST_QUIET", "0") == "1"
         for row in results:
             table_lines.append("| " + " | ".join(row) + " |")
@@ -164,11 +183,15 @@ class TestGradientPrecisionComparision(unittest.TestCase):
             print("\n".join(table_lines))
 
          # --- Pass if all rel errors for float16+DynamicScaler are below 1e-2 ---
+        found_fp16_scaled_row = False
         for row in results:
-            dtype, scaler, err_state, err_dz0, err_da, err_db, err_dc = row
-            if dtype == 'torch.float16' and scaler == "DynamicScaler(tuned)" and err_dz0 != 'fail':
+            z0_tag, dtype, scaler, err_state, err_dz0, err_da, err_db, err_dc = row
+            if dtype == 'torch.float16' and scaler == "DynamicScaler(tuned)":
+                found_fp16_scaled_row = True
+                self.assertNotEqual(err_dz0, 'fail', f"float16+DynamicScaler(tuned) failed for {z0_tag}")
                 all_below = all(float(err) <= 1e-2 for err in (err_dz0, err_da, err_db, err_dc))
-                self.assertTrue(all_below, f"float16+DynamicScaler rel error(s) too large: {[err_dz0, err_da, err_db, err_dc]}")
+                self.assertTrue(all_below, f"float16+DynamicScaler(tuned) rel error(s) too large for {z0_tag}: {[err_dz0, err_da, err_db, err_dc]}")
+        self.assertTrue(found_fp16_scaled_row, "No float16+DynamicScaler(tuned) rows were produced")
 
 
         # Plot analytic |y(t)| in log‑scale together with numerical FP16/FP32
@@ -248,10 +271,10 @@ class TestGradientPrecisionComparision(unittest.TestCase):
         Polynomial-damped ODE test
           z'(t) = -(a t² + b t + c) z(t)
           T    = {self.model.T}
-          a    = {float(self.model.a)}
-          b    = {float(self.model.b)}
-          c    = {float(self.model.c)}
-          z0   = {float(self.z0)}
+                    a    = {float(self.model.a.detach())}
+                    b    = {float(self.model.b.detach())}
+                    c    = {float(self.model.c.detach())}
+                    z0   = {float(self.z0.detach())}
           L1 steps = {len(self.t)-1}
 
         Results table:
