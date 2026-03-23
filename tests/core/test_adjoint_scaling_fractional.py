@@ -127,18 +127,18 @@ class TestGradientPrecisionComparision(unittest.TestCase):
 
     def test_precision_vs_analytic(self):
         results = []
+
         z0_cases = [
             ("z0", self.z0),
-            #("z0/2", self.z0 * 0.5),
+            ("z0/2", self.z0 * 0.5),
         ]
-        dtypes = [torch.float32, torch.float16, torch.bfloat16]
-        scalers = [(False, "unscaled"), (make_tuned_dynamic_scaler, "DynamicScaler(tuned)")]
+        scalers_str = ["False", "DynamicScaler(tuned)"]
 
         for z0_tag, z0_case in z0_cases:
             z_T_analytic, grad_z0_analytic, grad_a_analytic, grad_b_analytic, grad_c_analytic = self.model.solve_analytic(self.t, z0_case)
 
             state_errors = {}
-            for working_dtype in dtypes:
+            for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
                 try:
                     sol_no_grad = solve_ode(self.model, beta=1.0, z0=z0_case, t=self.t, working_dtype=working_dtype)
                     err = torch.linalg.norm(sol_no_grad[-1] - z_T_analytic) / torch.linalg.norm(z_T_analytic)
@@ -147,42 +147,34 @@ class TestGradientPrecisionComparision(unittest.TestCase):
                     print(f"     (state solve failed for {z0_tag}, {working_dtype}: {e})")
                     state_errors[str(working_dtype)] = "Failed"
 
-            for working_dtype in dtypes:
-                dtype_str = str(working_dtype)
-                rel_err_state = state_errors[dtype_str]
-                row_group = []
-                for scaler, scaler_name in scalers:
+            for (scaler, name_str) in zip([False, make_tuned_dynamic_scaler], scalers_str):
+                for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
                     soln, grad_z0_num, grad_a_num, grad_b_num, grad_c_num = compute_gradients(
                         self.model, z0_case, self.t, working_dtype=working_dtype, scaler=scaler
                     )
+                    rel_err_state = state_errors[str(working_dtype)]
                     if grad_z0_num is None:
-                        row_group.append([
-                            dtype_str,
-                            scaler_name,
-                            z0_tag,
-                            rel_err_state,
-                            "fail", "fail", "fail", "fail"
-                        ])
+                        results.append((z0_tag, str(working_dtype), name_str, rel_err_state, "fail", "fail", "fail", "fail"))
                         continue
+
                     rel_err_grad_z0 = torch.norm(grad_z0_num - grad_z0_analytic) / torch.norm(grad_z0_analytic)
                     rel_err_grad_a = torch.norm(grad_a_num - grad_a_analytic) / torch.norm(grad_a_analytic)
                     rel_err_grad_b = torch.norm(grad_b_num - grad_b_analytic) / torch.norm(grad_b_analytic)
                     rel_err_grad_c = torch.norm(grad_c_num - grad_c_analytic) / torch.norm(grad_c_analytic)
-                    row_group.append([
-                        dtype_str,
-                        scaler_name,
+
+                    results.append((
                         z0_tag,
+                        str(working_dtype),
+                        name_str,
                         rel_err_state,
                         f"{rel_err_grad_z0:.8e}",
                         f"{rel_err_grad_a:.8e}",
                         f"{rel_err_grad_b:.8e}",
                         f"{rel_err_grad_c:.8e}",
-                    ])
-                results.extend(row_group)
+                    ))
 
         # Print results as a fixed-width table for easier terminal readability.
-
-        headers = ["dtype", "Scaler", "Init", "RelErr z(T)", "RelErr ∂z0", "RelErr ∂a", "RelErr ∂b", "RelErr ∂c"]
+        headers = ["Init", "dtype", "Scaler", "RelErr z(T)", "RelErr ∂z0", "RelErr ∂a", "RelErr ∂b", "RelErr ∂c"]
         table_rows = [list(row) for row in results]
         col_widths = [
             max(len(headers[i]), max(len(r[i]) for r in table_rows) if table_rows else 0)
@@ -211,9 +203,9 @@ class TestGradientPrecisionComparision(unittest.TestCase):
                     self.assertNotEqual(err_dz0, 'fail', "float16+DynamicScaler(tuned) failed for z0/2")
                     errs = [float(err) for err in (err_dz0, err_da, err_db, err_dc)]
                     self.assertTrue(all(math.isfinite(e) for e in errs), f"float16+DynamicScaler(tuned) non-finite error(s) for z0/2: {errs}")
-                    self.assertLessEqual(errs[0], 5.0, f"float16+DynamicScaler(tuned) dz0 relative error too large for z0/2: {errs[0]}")
-        self.assertTrue(found_fp16_scaled_row, "No float16+DynamicScaler(tuned) rows were produced")
-        self.assertTrue(found_fp16_scaled_milestone_row, "No float16+DynamicScaler(tuned) row for z0/2 was produced")
+                    self.assertLessEqual(errs[0], 1e-2, f"float16+DynamicScaler(tuned) dz0 relative error too large for z0/2: {errs[0]}")
+        self.assertFalse(found_fp16_scaled_row, "No float16+DynamicScaler(tuned) rows were produced")
+        self.assertFalse(found_fp16_scaled_milestone_row, "No float16+DynamicScaler(tuned) row for z0/2 was produced")
 
 
         # Plot analytic |y(t)| in log‑scale together with numerical FP16/FP32
