@@ -14,7 +14,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from rampde import odeint, DynamicScaler
 from torch.amp import autocast
 
@@ -76,14 +76,15 @@ class PolynomialDampedODE(nn.Module):
 def solve_ode(model, beta, z0, t, working_dtype = torch.float32, scaler = DynamicScaler):
     with autocast(device_type='cuda', dtype=working_dtype):
         # Case where no scaling is used vs Dynamic Scaling
-        if scaler is None or False:
-            loss_scaler = False
+        if scaler is None or scaler is False:
+            loss_scaler = scaler
         else:
             loss_scaler = scaler(working_dtype)
         return odeint(model, z0, t, beta=beta, method='l1', loss_scaler=loss_scaler)
     
 def compute_gradients(model, z0, t, working_dtype = torch.float32, scaler = DynamicScaler):
     z0 = z0.detach().clone().requires_grad_(True)
+    soln_forward = None
     try:
         with autocast(device_type='cuda', dtype=working_dtype):
             z0.grad = None
@@ -126,9 +127,9 @@ class TestGradientPrecisionComparision(unittest.TestCase):
                 print(f"     (state solve failed for {working_dtype}: {e})")
                 state_errors[str(working_dtype)] = "Failed"
 
-        scalers_str = ["None", "DynamicScaler"]
+        scalers_str = ["False", "DynamicScaler"]
         for working_dtype in [torch.float32, torch.float16, torch.bfloat16]:
-            for (scaler, name_str) in zip([None, DynamicScaler], scalers_str):
+            for (scaler, name_str) in zip([False, DynamicScaler], scalers_str):
                 soln, grad_z0_num, grad_a_num, grad_b_num, grad_c_num = compute_gradients(self.model, self.z0, self.t, working_dtype = working_dtype, scaler = scaler)
                 rel_err_state = state_errors[str(working_dtype)]
                 if grad_z0_num is None:

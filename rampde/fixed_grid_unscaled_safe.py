@@ -230,7 +230,7 @@ class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
             grad_theta_inf = [torch.full_like(grad, float('inf')) for grad in grad_theta]
             grad_t_inf = torch.full_like(t, float('inf')) if t.requires_grad else None
             
-            return (None, None, a_inf, grad_t_inf, None, *grad_theta_inf)
+            return (None, None, a_inf, None, grad_t_inf, None, *grad_theta_inf)
         
         finally:
             # Always restore original parameters
