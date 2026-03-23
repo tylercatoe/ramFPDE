@@ -8,7 +8,7 @@ the optimal solver variant based on the loss scaler type and precision.
 from typing import Union, Optional, Tuple, Literal, TypeVar, Callable, Type, Any
 import torch
 from .increment import INCREMENTS, get_increment_function
-from .fixed_grid_unscaled import FixedGridODESolverUnscaled
+from .fixed_grid_unscaled_uniform import FixedGridODESolverUnscaledUniform
 from .fixed_grid_dynamic_uniform import FixedGridODESolverDynamicUniform
 from .fixed_grid_unscaled_safe import FixedGridODESolverUnscaledSafe
 from .loss_scalers import DynamicScaler
@@ -95,7 +95,7 @@ def _select_ode_solver(
     elif loss_scaler is None:
         if precision in [torch.float32, torch.bfloat16, torch.float64]:
             # Optimal performance for stable precisions
-            return FixedGridODESolverUnscaled, loss_scaler
+            return FixedGridODESolverUnscaledUniform, loss_scaler
         else:
             # May need overflow protection for float16
             return FixedGridODESolverUnscaledSafe, loss_scaler
