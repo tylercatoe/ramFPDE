@@ -91,7 +91,7 @@ def make_tuned_dynamic_scaler(dtype_low: torch.dtype) -> DynamicScaler:
         increase_factor=1.0,
         decrease_factor=0.125,
         max_attempts=150,
-        verbose=True,
+        verbose=False,
     )
     
 def compute_gradients(model, z0, t, working_dtype = torch.float32, scaler = DynamicScaler):
