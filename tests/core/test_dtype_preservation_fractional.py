@@ -9,7 +9,6 @@ maintain the expected precision.
 import unittest
 import torch
 import torch.nn as nn
-import math
 import random
 import numpy as np
 from rampde import odeint
@@ -34,7 +33,7 @@ class SimpleDtypeCheckingFODE(nn.Module):
     def forward(self, t: torch.Tensor, z: torch.Tensor):
         # Check input dtype
         assert t.dtype == self.target_dtype, f"t has dtype {t.dtype}, expected {self.target_dtype}"
-        assert z.dtype == self.target_dtype, f"z has dtype {z.dtype}, expected {self.target_dtype}"
+        assert z.dtype == self.target_dtype, f"z has dtype {z.dtype}, expected {self.target_dtype}, device {z.device}"
 
         # First layer 
         h = torch.matmul(z, self.W1.t()) + self.b1
