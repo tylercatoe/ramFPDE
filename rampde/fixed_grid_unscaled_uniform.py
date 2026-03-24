@@ -69,7 +69,12 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
             beta = 1.0 - 0.0001  # Avoid edge case in Gamma function for beta=1
         
         # Determine precision
-        dtype_low = torch.get_autocast_dtype('cuda') if torch.is_autocast_enabled() else dtype_hi
+        device_type = zt.device.type
+        try:
+            autocast_enabled = torch.is_autocast_enabled(device_type)
+        except TypeError:
+            autocast_enabled = torch.is_autocast_enabled() if device_type == "cuda" else False
+        dtype_low = torch.get_autocast_dtype(device_type) if autocast_enabled else dtype_hi
         
         # Initialize gradients
         N = t.shape[0]
