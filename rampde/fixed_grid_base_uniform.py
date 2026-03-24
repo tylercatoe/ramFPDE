@@ -64,12 +64,18 @@ class FixedGridODESolverBase(torch.autograd.Function):
             zt: Solution tensor at all time points
         """
         with torch.no_grad():
+            device_type = z0.device.type
+            try:
+                autocast_enabled = torch.is_autocast_enabled(device_type)
+            except TypeError:
+                autocast_enabled = torch.is_autocast_enabled() if device_type == "cuda" else False
+
             if beta == 1.0:
                 beta = 1.0 - 0.0001
 
             # Determine precision levels
             dtype_hi = z0.dtype
-            dtype_low = torch.get_autocast_dtype('cuda') if torch.is_autocast_enabled() else dtype_hi
+            dtype_low = torch.get_autocast_dtype(device_type) if autocast_enabled else dtype_hi
             
             # Initialize solution storage
             N = t.shape[0]
@@ -90,7 +96,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
             for k in range(0, N-1): 
                 zk1P = torch.zeros_like(z0, dtype=dtype_hi, device=z0.device)
                 zk1 = torch.zeros_like(z0, dtype=dtype_hi, device=z0.device)
-                with autocast(device_type='cuda', dtype=dtype_low):
+                with autocast(device_type=device_type, dtype=dtype_low, enabled=autocast_enabled):
                     if k > 0:
                         # Vectorized history accumulation over j=0,...,k-1.
                         j_idx = j_full[:k]
