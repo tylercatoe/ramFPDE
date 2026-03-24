@@ -30,24 +30,20 @@ class SimpleDtypeCheckingFODE(nn.Module):
         self.b2 = nn.Parameter(torch.zeros(dim, dtype=target_dtype))
 
     def forward(self, t: torch.Tensor, z: torch.Tensor):
-        print(f"[DEBUG] FODE.forward: t.dtype={t.dtype}, z.dtype={z.dtype}, target_dtype={self.target_dtype}")
         # Check input dtype
         assert t.dtype == self.target_dtype, f"t has dtype {t.dtype}, expected {self.target_dtype}"
         assert z.dtype == self.target_dtype, f"z has dtype {z.dtype}, expected {self.target_dtype}, device {z.device}"
 
         # First layer 
         h = torch.matmul(z, self.W1.t()) + self.b1
-        print(f"[DEBUG] FODE.forward: h (after matmul+bias) dtype={h.dtype}")
         assert h.dtype == self.target_dtype, f"hidden layer has dtype {h.dtype}, expected {self.target_dtype}"
 
         # ReLU
         h = torch.relu(h)
-        print(f"[DEBUG] FODE.forward: h (after relu) dtype={h.dtype}")
         assert h.dtype == self.target_dtype, f"after ReLU has dtype {h.dtype}, expected {self.target_dtype}"
 
         # Second layer
         out = torch.matmul(h, self.W2.t()) + self.b2
-        print(f"[DEBUG] FODE.forward: out (after matmul+bias) dtype={out.dtype}")
         assert out.dtype == self.target_dtype, f"output has dtype {out.dtype}, expected {self.target_dtype}"
 
         return out
