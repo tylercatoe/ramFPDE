@@ -26,9 +26,9 @@ class SimpleDtypeCheckingFODE(nn.Module):
             torch.manual_seed(seed)
 
         # Initialize weights in target dtype
-        self.W1 = nn.Parameter(torch.randn(dim, dim, dtype=target_dtype))
-        self.W2 = nn.Parameter(torch.randn(dim, dim, dtype=target_dtype))
-        self.b1 = nn.Parameter(torch.zeros(dim, dtype=target_dtype))
+        self.W1 = nn.Parameter(torch.randn(64, dim, dtype=target_dtype) * 0.1)
+        self.W2 = nn.Parameter(torch.randn(dim, 64, dtype=target_dtype) * 0.1)
+        self.b1 = nn.Parameter(torch.zeros(46, dtype=target_dtype))
         self.b2 = nn.Parameter(torch.zeros(dim, dtype=target_dtype))
 
     def forward(self, t: torch.Tensor, z: torch.Tensor):
@@ -82,6 +82,7 @@ class TestDtypePreservationFractional(unittest.TestCase):
         z0 = torch.randn(10, dtype=dtype, device=device)
         t = torch.linspace(0, 1, steps = 10, dtype = dtype, device = device)
         beta = torch.tensor(0.5, dtype=dtype, device=device)
+        print(f"Testing dtype preservation for dtype={dtype} on device={device}, z0 dtype={z0.dtype}, t dtype={t.dtype}, beta dtype={beta.dtype}")
 
         # Run solver - should not raise any dtype assertion errors
         zt = odeint(func, z0, t, beta=beta)
