@@ -78,6 +78,7 @@ class TestDtypePreservationFractional(unittest.TestCase):
 
         # create inputs with target dtype
         z0 = torch.randn(10, dtype=dtype, device=device)
+        print(f"Created z0 with dtype {z0.dtype} on device {z0.device}")
         t = torch.linspace(0, 1, steps = 10, dtype = dtype, device = device)
         beta = torch.tensor(0.5, dtype=dtype, device=device)
         print(f"Testing dtype preservation for dtype={dtype} on device={device}, z0 dtype={z0.dtype}, t dtype={t.dtype}, beta dtype={beta.dtype}")
