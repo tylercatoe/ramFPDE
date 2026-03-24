@@ -20,7 +20,6 @@ class SimpleDtypeCheckingFODE(nn.Module):
         super().__init__()
         self.dim = dim
         self.target_dtype = target_dtype
-
         if seed is not None:
             torch.manual_seed(seed)
 
