@@ -13,7 +13,7 @@ from typing import Any, Optional, Tuple
 import torch
 from torch.amp import autocast
 from .fixed_grid_base_uniform import FixedGridODESolverBase
-from math import gamma
+from torch.special import gamma
 
 # Import custom_fwd and custom_bwd from torch.cuda.amp
 try:
@@ -82,7 +82,7 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         any_param_requires_grad = any(p.requires_grad for p in params) if params else False
         
         # Calculate Gamma(beta) once
-        gamma_beta = gamma(beta.item())
+        gamma_beta = gamma(beta.item()).to(dtype_hi)
 
         # Initialize adjoint storage
         at_history = torch.zeros_like(zt, dtype = dtype_hi)
@@ -96,7 +96,7 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
 
         for k in reversed(range(1, N)): # k = N-1, N-2, ..., 1, we calculate at_history[k-1] at each iteration
             with torch.no_grad():
-                da = torch.zeros_like(a)
+                da = torch.zeros_like(a, dtype = dtype_hi)
 
                 # Cache all j-dependent coefficients for this k.
                 j_idx = j_full[k - 1:N - 1]
