@@ -173,78 +173,78 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
 
                     da = a + 1 / (scaler.S * gamma_beta) * da
                     at_history[k-1] = da.to(dtype_hi)
-            if any_param_requires_grad:
-                attempts_params = 0
-                while attempts_params < scaler.max_attempts:
-                    # Check for overflow in final adjoint gradient
-                    z_k = zt[k].to(dtype_low).detach().requires_grad_(True)
-                    z_km1 = zt[k-1].to(dtype_low).detach().requires_grad_(True)
+                if any_param_requires_grad:
+                    attempts_params = 0
+                    while attempts_params < scaler.max_attempts:
+                        # Check for overflow in final adjoint gradient
+                        z_k = zt[k].to(dtype_low).detach().requires_grad_(True)
+                        z_km1 = zt[k-1].to(dtype_low).detach().requires_grad_(True)
+                        
+                        if _is_any_infinite((scaler.S * at_history[k], scaler.S * at_history[k-1])):
+                            scaler.update_on_overflow()
+                            attempts_params += 1
+                            continue
+
+                        with torch.enable_grad():
+                            dfk = increment_func(ode_func, z_k, t[k], 0.0)
+
+                        grads = torch.autograd.grad(
+                            dfk, params, scaler.S * at_history[k],
+                            create_graph=False, allow_unused=True
+                        )
+                        dparams_k = [d if d is not None else torch.zeros_like(p)
+                                        for d, p in zip(grads, params)]
+
+                        with torch.enable_grad():
+                            dfk1 = increment_func(ode_func, z_km1, t[k-1], 0.0)
+                        grads = torch.autograd.grad(
+                            dfk1, params, scaler.S * at_history[k-1],
+                            create_graph=False, allow_unused=True
+                        )
+                        dparams_km1 = [d if d is not None else torch.zeros_like(p)
+                                        for d, p in zip(grads, params)]
+
+                        trap_updates = [0.5 * h / scaler.S * (d_k.to(dtype_hi) + d_km1.to(dtype_hi)) for d_k, d_km1 in zip(dparams_k, dparams_km1)]
+                        
+                        if _is_any_infinite((dparams_k, dparams_km1, trap_updates)):
+                            scaler.update_on_overflow()
+                            attempts_params += 1
+                            continue
+
+                        break
+                    if attempts_params >= scaler.max_attempts:
+                        raise RuntimeError(
+                            f"Reached maximum number of {scaler.max_attempts} attempts "
+                            f"in parameter gradient computation at time step k={k}"
+                        )
                     
-                    if _is_any_infinite((scaler.S * at_history[k], scaler.S * at_history[k-1])):
-                        scaler.update_on_overflow()
-                        attempts_params += 1
-                        continue
+                    torch._foreach_add_(grad_theta, trap_updates)
+                
+                    # Check for overflow in accumulated gradients with enhanced error reporting
+                    if _is_any_infinite((da, grad_theta)):
+                        # Collect diagnostic information
+                        error_details = []
+                        if not da.isfinite().all():
+                            n_inf = torch.isinf(da).sum().item()
+                            n_nan = torch.isnan(da).sum().item()
+                            error_details.append(f"adjoint: {n_inf} inf, {n_nan} nan")
 
-                    with torch.enable_grad():
-                        dfk = increment_func(ode_func, z_k, t[k], 0.0)
+                        if any(not g.isfinite().all() for g in grad_theta):
+                            bad_params = sum(1 for g in grad_theta if not g.isfinite().all())
+                            error_details.append(f"param_grads: {bad_params}/{len(grad_theta)} tensors")
 
-                    grads = torch.autograd.grad(
-                        dfk, params, scaler.S * at_history[k],
-                        create_graph=False, allow_unused=True
-                    )
-                    dparams_k = [d if d is not None else torch.zeros_like(p)
-                                    for d, p in zip(grads, params)]
-
-                    with torch.enable_grad():
-                        dfk1 = increment_func(ode_func, z_km1, t[k-1], 0.0)
-                    grads = torch.autograd.grad(
-                        dfk1, params, scaler.S * at_history[k-1],
-                        create_graph=False, allow_unused=True
-                    )
-                    dparams_km1 = [d if d is not None else torch.zeros_like(p)
-                                    for d, p in zip(grads, params)]
-
-                    trap_updates = [0.5 * h / scaler.S * (d_k.to(dtype_hi) + d_km1.to(dtype_hi)) for d_k, d_km1 in zip(dparams_k, dparams_km1)]
+                        # Enhanced error message with actionable suggestions
+                        error_msg = (
+                            f"Gradients became non-finite at time step {k}/{len(t)-1}.\n"
+                            f"Scale factor: {scaler.S:.2e}, attempt: {max(attempts, attempts_params)}/{scaler.max_attempts}\n"
+                            f"Non-finite: {', '.join(error_details)}\n"
+                            f"Try: reduce learning rate, gradient clipping, check ODE stability, or use float32"
+                        )
+                        raise RuntimeError(error_msg)
                     
-                    if _is_any_infinite((dparams_k, dparams_km1, trap_updates)):
-                        scaler.update_on_overflow()
-                        attempts_params += 1
-                        continue
-
-                    break
-                if attempts_params >= scaler.max_attempts:
-                    raise RuntimeError(
-                        f"Reached maximum number of {scaler.max_attempts} attempts "
-                        f"in parameter gradient computation at time step k={k}"
-                    )
-                
-                torch._foreach_add_(grad_theta, trap_updates)
-                
-                # Check for overflow in accumulated gradients with enhanced error reporting
-                if _is_any_infinite((da, grad_theta)):
-                    # Collect diagnostic information
-                    error_details = []
-                    if not da.isfinite().all():
-                        n_inf = torch.isinf(da).sum().item()
-                        n_nan = torch.isnan(da).sum().item()
-                        error_details.append(f"adjoint: {n_inf} inf, {n_nan} nan")
-
-                    if any(not g.isfinite().all() for g in grad_theta):
-                        bad_params = sum(1 for g in grad_theta if not g.isfinite().all())
-                        error_details.append(f"param_grads: {bad_params}/{len(grad_theta)} tensors")
-
-                    # Enhanced error message with actionable suggestions
-                    error_msg = (
-                        f"Gradients became non-finite at time step {k}/{len(t)-1}.\n"
-                        f"Scale factor: {scaler.S:.2e}, attempt: {max(attempts, attempts_params)}/{scaler.max_attempts}\n"
-                        f"Non-finite: {', '.join(error_details)}\n"
-                        f"Try: reduce learning rate, gradient clipping, check ODE stability, or use float32"
-                    )
-                    raise RuntimeError(error_msg)
-                
-                # Adjust upward scaling if the norm is too small
-                if max(attempts, attempts_params) == 0 and scaler.check_for_increase(da):
-                    scaler.update_on_small_grad()
+                    # Adjust upward scaling if the norm is too small
+                    if max(attempts, attempts_params) == 0 and scaler.check_for_increase(da):
+                        scaler.update_on_small_grad()
 
             # Return gradients for all inputs to forward pass
             # (increment_func, ode_func, z0, beta, t, loss_scaler, *params)
