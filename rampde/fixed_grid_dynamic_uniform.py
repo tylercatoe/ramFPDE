@@ -65,8 +65,6 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
         dtype_hi = ctx.dtype_hi
         scaler = ctx.loss_scaler
 
-        if beta == 1.0:
-            beta = 1.0 - 0.0001  # Avoid edge case in Gamma function for beta=1
         
         # Determine precision
         device_type = zt.device.type

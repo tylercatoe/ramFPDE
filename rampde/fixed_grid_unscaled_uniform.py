@@ -64,9 +64,6 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         ode_func = ctx.ode_func
         t = ctx.t
         dtype_hi = ctx.dtype_hi
-
-        if beta == 1.0:
-            beta = 1.0 - 0.0001  # Avoid edge case in Gamma function for beta=1
         
         # Determine precision
         device_type = zt.device.type
