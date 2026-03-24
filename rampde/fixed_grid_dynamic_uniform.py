@@ -108,6 +108,9 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
             j_full = torch.arange(max(N - 1, 1), device=zt.device, dtype=dtype_low)
 
             for k in reversed(range(1, N)): # k = N-1, N-2, ..., 1, we calculate at_history[k-1] at each iteration
+                step_attempts_adj = 0
+                step_attempts_params = 0
+
                 with torch.no_grad():
                     da = torch.zeros_like(a, dtype=dtype_hi)
 
@@ -122,12 +125,13 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                         tj = t[j]
                         nu_jk1 = nu_vec[offset]
 
-                        attempts = 0
-                        while attempts < scaler.max_attempts:
+                        attempts_j = 0
+                        while attempts_j < scaler.max_attempts:
                             # Check for overflow in scaled gradients
                             if _is_any_infinite((scaler.S * a_ind,)):
                                 scaler.update_on_overflow()
-                                attempts += 1
+                                attempts_j += 1
+                                step_attempts_adj += 1
                                 continue
 
                             # Rebuild computational graph
@@ -157,13 +161,14 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                             # Check for overflow in computed gradients
                             if _is_any_infinite((da_ind, dparams)):
                                 scaler.update_on_overflow()
-                                attempts += 1
+                                attempts_j += 1
+                                step_attempts_adj += 1
                                 continue
                             else:
                                 break
 
                         # Check if we exceeded maximum attempts
-                        if attempts >= scaler.max_attempts:
+                        if attempts_j >= scaler.max_attempts:
                             raise RuntimeError(
                                 f"Reached maximum number of {scaler.max_attempts} attempts "
                                 f"in backward pass at time step k={k}"
@@ -183,6 +188,7 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                         if _is_any_infinite((scaler.S * at_history[k], scaler.S * at_history[k-1])):
                             scaler.update_on_overflow()
                             attempts_params += 1
+                            step_attempts_params += 1
                             continue
 
                         with torch.enable_grad():
@@ -209,6 +215,7 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                         if _is_any_infinite((dparams_k, dparams_km1, trap_updates)):
                             scaler.update_on_overflow()
                             attempts_params += 1
+                            step_attempts_params += 1
                             continue
 
                         break
@@ -220,6 +227,8 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                     
                     torch._foreach_add_(grad_theta, trap_updates)
                 
+                    step_attempts = step_attempts_adj + step_attempts_params
+
                     # Check for overflow in accumulated gradients with enhanced error reporting
                     if _is_any_infinite((da, grad_theta)):
                         # Collect diagnostic information
@@ -236,14 +245,14 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                         # Enhanced error message with actionable suggestions
                         error_msg = (
                             f"Gradients became non-finite at time step {k}/{len(t)-1}.\n"
-                            f"Scale factor: {scaler.S:.2e}, attempt: {max(attempts, attempts_params)}/{scaler.max_attempts}\n"
+                            f"Scale factor: {scaler.S:.2e}, attempt: {step_attempts}/{scaler.max_attempts}\n"
                             f"Non-finite: {', '.join(error_details)}\n"
                             f"Try: reduce learning rate, gradient clipping, check ODE stability, or use float32"
                         )
                         raise RuntimeError(error_msg)
                     
                     # Adjust upward scaling if the norm is too small
-                    if max(attempts, attempts_params) == 0 and scaler.check_for_increase(da):
+                    if step_attempts == 0 and scaler.check_for_increase(da):
                         scaler.update_on_small_grad()
 
             # Return gradients for all inputs to forward pass
