@@ -28,7 +28,7 @@ class SimpleDtypeCheckingFODE(nn.Module):
         # Initialize weights in target dtype
         self.W1 = nn.Parameter(torch.randn(64, dim, dtype=target_dtype) * 0.1)
         self.W2 = nn.Parameter(torch.randn(dim, 64, dtype=target_dtype) * 0.1)
-        self.b1 = nn.Parameter(torch.zeros(46, dtype=target_dtype))
+        self.b1 = nn.Parameter(torch.zeros(64, dtype=target_dtype))
         self.b2 = nn.Parameter(torch.zeros(dim, dtype=target_dtype))
 
     def forward(self, t: torch.Tensor, z: torch.Tensor):
@@ -85,7 +85,7 @@ class TestDtypePreservationFractional(unittest.TestCase):
         print(f"Testing dtype preservation for dtype={dtype} on device={device}, z0 dtype={z0.dtype}, t dtype={t.dtype}, beta dtype={beta.dtype}")
 
         # Run solver - should not raise any dtype assertion errors
-        zt = odeint(func, z0, t, beta=beta)
+        zt = odeint(func, z0, t, beta=beta, method='l1', loss_scaler=False)
 
         # Check output dtype
         self.assertEqual(zt.dtype, dtype, f"Output zt has dtype {zt.dtype}, expected {dtype}")
@@ -119,7 +119,7 @@ class TestDtypePreservationFractional(unittest.TestCase):
         t = torch.linspace(0, 1, steps = 10, dtype=torch.float64, device='cuda')
         beta = torch.tensor(0.5, dtype=torch.float64, device='cuda')
 
-        soln = odeint(func, z0, t, beta=beta)
+        soln = odeint(func, z0, t, beta=beta, method = 'l1', loss_scaler=False)
         loss = soln[-1].sum()
         loss.backward()
 
@@ -148,7 +148,7 @@ class TestDtypePreservationFractional(unittest.TestCase):
         scaler = DynamicScaler(dtype_low = torch.float16)
 
         # Run solver with dynamic scaler 
-        soln = odeint(func, z0, t, beta=beta, loss_scaler=scaler)
+        soln = odeint(func, z0, t, beta=beta, method='l1', loss_scaler=scaler)
         
         # Check output dtype
         self.assertEqual(soln.dtype, torch.float16, f"Output zt has dtype {soln.dtype}, expected torch.float16")
@@ -178,7 +178,7 @@ class TestDtypePreservationFractional(unittest.TestCase):
         beta = torch.tensor(0.5, dtype=torch.float16, device = 'cuda')
 
         # Run solver without scaler - may produce non-finite values but should preserve dtype
-        soln = odeint(func, z0, t, beta=beta)
+        soln = odeint(func, z0, t, beta=beta, method='l1', loss_scaler=False)
 
         # Check output dtype
         self.assertEqual(soln.dtype, torch.float16, f"Output zt has dtype {soln.dtype}, expected torch.float16")
