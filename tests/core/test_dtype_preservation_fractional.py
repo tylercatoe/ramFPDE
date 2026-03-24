@@ -223,7 +223,14 @@ class TestDtypePreservationFractional(unittest.TestCase):
         #self.assertEqual(solver, FixedGridODESolveUnscaledUniformSafe, "float16 with False should be unscaled safe")
 
         # Test float16 with DynamicScaler
-        scaler = DynamicScaler(dtype_low = torch.float16)
+        scaler = DynamicScaler(
+            dtype_low=torch.float16,
+            target_factor=128.0,
+            increase_factor=1.0,
+            decrease_factor=0.125,
+            max_attempts=150,
+            verbose=False,
+        )
         solver, _ = _select_ode_solver(scaler, torch.float16)
         self.assertEqual(solver, FixedGridODESolverDynamicUniform, "float16 with DynamicScaler should use dynamic solver")
 
