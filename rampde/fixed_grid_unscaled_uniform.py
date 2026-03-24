@@ -87,7 +87,8 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         any_param_requires_grad = any(p.requires_grad for p in params) if params else False
         
         # Calculate Gamma(beta) once
-        gamma_beta = torch.tensor(gamma(beta.item()), dtype=dtype_hi, device=zt.device)
+        beta_scalar = beta.item() if isinstance(beta, torch.Tensor) else float(beta)
+        gamma_beta = torch.tensor(gamma(beta_scalar), dtype=dtype_hi, device=zt.device)
 
         # Initialize adjoint storage
         at_history = torch.zeros_like(zt, dtype = dtype_hi)
