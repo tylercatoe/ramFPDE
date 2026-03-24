@@ -173,10 +173,17 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
 
                     da = a + 1 / (scaler.S * gamma_beta) * da
                     at_history[k-1] = da.to(dtype_hi)
-
-                if any_param_requires_grad:
+            if any_param_requires_grad:
+                attempts_params = 0
+                while attempts_params < scaler.max_attempts:
+                    # Check for overflow in final adjoint gradient
                     z_k = zt[k].to(dtype_low).detach().requires_grad_(True)
                     z_km1 = zt[k-1].to(dtype_low).detach().requires_grad_(True)
+                    
+                    if _is_any_infinite((scaler.S * at_history[k], scaler.S * at_history[k-1])):
+                        scaler.update_on_overflow()
+                        attempts_params += 1
+                        continue
 
                     with torch.enable_grad():
                         dfk = increment_func(ode_func, z_k, t[k], 0.0)
@@ -198,11 +205,23 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                                     for d, p in zip(grads, params)]
 
                     trap_updates = [0.5 * h / scaler.S * (d_k.to(dtype_hi) + d_km1.to(dtype_hi)) for d_k, d_km1 in zip(dparams_k, dparams_km1)]
-                    torch._foreach_add_(grad_theta, trap_updates)
+                    
+                    if _is_any_infinite((dparams_k, dparams_km1, trap_updates)):
+                        scaler.update_on_overflow()
+                        attempts_params += 1
+                        continue
 
+                    break
+                if attempts_params >= scaler.max_attempts:
+                    raise RuntimeError(
+                        f"Reached maximum number of {scaler.max_attempts} attempts "
+                        f"in parameter gradient computation at time step k={k}"
+                    )
+                
+                torch._foreach_add_(grad_theta, trap_updates)
+                
                 # Check for overflow in accumulated gradients with enhanced error reporting
                 if _is_any_infinite((da, grad_theta)):
-
                     # Collect diagnostic information
                     error_details = []
                     if not da.isfinite().all():
@@ -217,14 +236,14 @@ class FixedGridODESolverDynamicUniform(FixedGridODESolverBase):
                     # Enhanced error message with actionable suggestions
                     error_msg = (
                         f"Gradients became non-finite at time step {k}/{len(t)-1}.\n"
-                        f"Scale factor: {scaler.S:.2e}, attempt: {attempts}/{scaler.max_attempts}\n"
+                        f"Scale factor: {scaler.S:.2e}, attempt: {max(attempts, attempts_params)}/{scaler.max_attempts}\n"
                         f"Non-finite: {', '.join(error_details)}\n"
                         f"Try: reduce learning rate, gradient clipping, check ODE stability, or use float32"
                     )
                     raise RuntimeError(error_msg)
-
+                
                 # Adjust upward scaling if the norm is too small
-                if attempts == 0 and scaler.check_for_increase(da):
+                if max(attempts, attempts_params) == 0 and scaler.check_for_increase(da):
                     scaler.update_on_small_grad()
 
             # Return gradients for all inputs to forward pass
