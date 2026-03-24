@@ -78,7 +78,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
             zt[0] = z0.to(dtype_low)
 
             # Calculate Gamma(beta) once
-            gamma_beta = gamma(beta.item())
+            gamma_beta = torch.tensor(gamma(beta.item()), dtype=dtype_hi, device=zt.device)
 
             h = t[1] - t[0]  # Assuming uniform grid for simplicity
             predictor_factor = h ** beta / beta

@@ -13,7 +13,7 @@ from typing import Any, Optional, Tuple
 import torch
 from torch.amp import autocast
 from .fixed_grid_base_uniform import FixedGridODESolverBase
-from torch.special import gamma
+from math import gamma
 
 # Import custom_fwd and custom_bwd from torch.cuda.amp
 try:
@@ -82,7 +82,7 @@ class FixedGridODESolverUnscaledUniform(FixedGridODESolverBase):
         any_param_requires_grad = any(p.requires_grad for p in params) if params else False
         
         # Calculate Gamma(beta) once
-        gamma_beta = gamma(beta.item()).to(dtype_hi)
+        gamma_beta = torch.tensor(gamma(beta.item()), dtype=dtype_hi, device=zt.device)
 
         # Initialize adjoint storage
         at_history = torch.zeros_like(zt, dtype = dtype_hi)
