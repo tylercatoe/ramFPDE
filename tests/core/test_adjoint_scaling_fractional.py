@@ -122,7 +122,7 @@ class TestGradientPrecisionComparision(unittest.TestCase):
         self.device = torch.device('cuda')
         self.dim = 1
         self.model = PolynomialDampedODE().to(self.device)
-        self.t = torch.linspace(0.0, self.model.T, 100, device=self.device)
+        self.t = torch.linspace(0.0, self.model.T, 400, device=self.device)
         self.z0 = torch.tensor([65504.0/180], device=self.device)  # fp16 max normal
 
     def test_precision_vs_analytic(self):
