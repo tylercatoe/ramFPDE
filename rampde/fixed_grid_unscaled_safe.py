@@ -22,7 +22,6 @@ try:
 except ImportError:
     from torch.cuda.amp import custom_fwd, custom_bwd
 
-
 class FixedGridODESolverUnscaledSafe(FixedGridODESolverBase):
     """
     Unscaled safe fixed grid ODE solver with exception handling.
