@@ -28,8 +28,8 @@ Mixed precision:
 from ._version import __version__
 from .odeint import odeint
 from .increment import Euler, RK4, INCREMENTS
-from .fixed_grid_unscaled import FixedGridODESolverUnscaled
-from .fixed_grid_dynamic import FixedGridODESolverDynamic
+from .fixed_grid_unscaled_uniform import FixedGridODESolverUnscaledUniform
+from .fixed_grid_dynamic_uniform import FixedGridODESolverDynamicUniform
 from .fixed_grid_unscaled_safe import FixedGridODESolverUnscaledSafe
 from .loss_scalers import DynamicScaler
 from .utils import _is_any_infinite
@@ -38,6 +38,6 @@ __all__ = [
     "__version__",
     "odeint", 
     "Euler", "RK4", "INCREMENTS",
-    "FixedGridODESolverUnscaled", "FixedGridODESolverDynamic", "FixedGridODESolverUnscaledSafe",
+    "FixedGridODESolverUnscaledUniform", "FixedGridODESolverDynamicUniform", "FixedGridODESolverUnscaledSafe",
     "DynamicScaler", "_is_any_infinite"
 ]
