@@ -122,15 +122,15 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         z_terminal = zt[-1, 0]
 
         if loss_kind == "linear":
-            loss = z_terminal
+            loss = z_terminal.float()
             # dL/dz(T) for L = z(T).
             dL_dzT = 1.0
         elif loss_kind == "quadratic":
-            loss = 0.5 * z_terminal ** 2
+            loss = 0.5 * z_terminal.float() ** 2
             # dL/dz(T) for L = 0.5 z(T)^2.
             dL_dzT = z_terminal.item()
         elif loss_kind == "cubic":
-            loss = (z_terminal ** 3) / 3.0
+            loss = (z_terminal.float() ** 3) / 3.0
             # dL/dz(T) for L = z(T)^3 / 3.
             dL_dzT = z_terminal.item() ** 2
         else:

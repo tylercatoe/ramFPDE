@@ -280,10 +280,10 @@ class TestGradientPrecisionComparision(unittest.TestCase):
         Polynomial-damped ODE test
           z'(t) = -(a t² + b t + c) z(t)
           T    = {self.model.T}
-                    a    = {float(self.model.a.detach())}
-                    b    = {float(self.model.b.detach())}
-                    c    = {float(self.model.c.detach())}
-                    z0   = {float(self.z0.detach())}
+          a    = {float(self.model.a.detach())}
+          b    = {float(self.model.b.detach())}
+          c    = {float(self.model.c.detach())}
+          z0   = {float(self.z0.detach())}
           L1 steps = {len(self.t)-1}
 
         Results table:
