@@ -43,6 +43,8 @@ def create_parser():
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     # new arguments
     parser.add_argument('--method', type=str, choices=['l1', 'rk4', 'euler'], default='l1')
+    parser.add_argument('--beta', type=float, default=0.6,
+                        help='Fractional order beta in (0, 1] when method=l1')
     parser.add_argument('--precision', type=str, choices=['tfloat32', 'float32', 'float16','bfloat16'], default='float16')
     parser.add_argument('--odeint', type=str, choices=['torchdiffeq', 'rampde'], default='rampde')
     parser.add_argument('--unstable', action='store_true', 
@@ -158,7 +160,7 @@ class ODEFunc(nn.Module):
         return self.factor*y
     
 class ODEBlock(nn.Module):
-    def __init__(self, func, t_grid, solver="rk4", steps=4, loss_scaler=None, odeint_func=None):
+    def __init__(self, func, t_grid, solver="rk4", steps=4, loss_scaler=None, odeint_func=None, beta=None):
         super().__init__()
         self.func   = func
         self.solver = solver
@@ -166,12 +168,15 @@ class ODEBlock(nn.Module):
         self.register_buffer('t_grid', t_grid)
         self.loss_scaler = loss_scaler
         self.odeint_func = odeint_func
+        self.beta = beta
 
     def forward(self, x):
+        ode_kwargs = {'method': self.solver}
         if self.loss_scaler is not None:
-            out = self.odeint_func(self.func, x, self.t_grid, method=self.solver, loss_scaler=self.loss_scaler)
-        else:
-            out = self.odeint_func(self.func, x, self.t_grid, method=self.solver)
+            ode_kwargs['loss_scaler'] = self.loss_scaler
+        if self.beta is not None:
+            ode_kwargs['beta'] = self.beta
+        out = self.odeint_func(self.func, x, self.t_grid, **ode_kwargs)
         return out[-1]
 
 class MPNODE_STL10(nn.Module):
@@ -181,6 +186,11 @@ class MPNODE_STL10(nn.Module):
         # Create t_grid on the appropriate device
         device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
         t_grid = torch.linspace(0, 1.0, 5, device=device)
+        beta = (
+            torch.tensor(args.beta, dtype=precision, device=device)
+            if args.odeint == 'rampde' and args.method == 'l1'
+            else None
+        )
         # 1) stem: 3×96×96 -> 64×96×96
         self.stem = nn.Conv2d(3, ch, 3, padding=1, bias=True)
         self.norm1 = nn.InstanceNorm2d(ch, affine=True)
@@ -193,7 +203,15 @@ class MPNODE_STL10(nn.Module):
             S1 = False
         else:
             S1 = None
-        self.ode1 = ODEBlock(ODEFunc(ch, t_grid, is_stable=args.stable), t_grid, solver="rk4", steps=4, loss_scaler=S1, odeint_func=odeint_func)
+        self.ode1 = ODEBlock(
+            ODEFunc(ch, t_grid, is_stable=args.stable),
+            t_grid,
+            solver=args.method,
+            steps=4,
+            loss_scaler=S1,
+            odeint_func=odeint_func,
+            beta=beta,
+        )
         
         # 3) down-sample stride-2 3×3
         self.conn1 = nn.Conv2d(ch, 2*ch, 1,  padding=0, bias=True)
@@ -209,7 +227,15 @@ class MPNODE_STL10(nn.Module):
             S2 = False
         else:
             S2 = None
-        self.ode2 = ODEBlock(ODEFunc(2*ch, t_grid, is_stable=args.stable), t_grid, solver="rk4", steps=4, loss_scaler=S2, odeint_func=odeint_func)
+        self.ode2 = ODEBlock(
+            ODEFunc(2 * ch, t_grid, is_stable=args.stable),
+            t_grid,
+            solver=args.method,
+            steps=4,
+            loss_scaler=S2,
+            odeint_func=odeint_func,
+            beta=beta,
+        )
         self.conn2 = nn.Conv2d(2*ch, 4*ch, 1,  padding=0, bias=True)
         self.avg2 = nn.AvgPool2d(2, stride=2)
         self.norm4 = nn.InstanceNorm2d(4*ch, affine=True)
@@ -221,7 +247,15 @@ class MPNODE_STL10(nn.Module):
             S3 = False
         else:
             S3 = None
-        self.ode3 = ODEBlock(ODEFunc(4*ch, t_grid, is_stable=args.stable), t_grid, solver="rk4", steps=4, loss_scaler=S3, odeint_func=odeint_func)
+        self.ode3 = ODEBlock(
+            ODEFunc(4 * ch, t_grid, is_stable=args.stable),
+            t_grid,
+            solver=args.method,
+            steps=4,
+            loss_scaler=S3,
+            odeint_func=odeint_func,
+            beta=beta,
+        )
         
         self.act = nn.ReLU(inplace=True)
         # 5) global avg-pool + FC
@@ -432,7 +466,7 @@ def main():
     }
     
     result_dir, ckpt_path, folder_name, device, log_file = setup_experiment(
-        args.results_dir, "ode_stl10", "stl10", args.precision,
+        args.results_dir, "ode_stl10_fractional", "stl10_fractional", args.precision,
         args.odeint, args.method, args.seed, args.gpu, scaler_name,
         extra_params=extra_params, args=args
     )

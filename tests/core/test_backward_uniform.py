@@ -128,11 +128,11 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         elif loss_kind == "quadratic":
             loss = 0.5 * z_terminal.float() ** 2
             # dL/dz(T) for L = 0.5 z(T)^2.
-            dL_dzT = z_terminal.item()
+            dL_dzT = z_terminal.float().item()
         elif loss_kind == "cubic":
             loss = (z_terminal.float() ** 3) / 3.0
             # dL/dz(T) for L = z(T)^3 / 3.
-            dL_dzT = z_terminal.item() ** 2
+            dL_dzT = (z_terminal.float() ** 2).item()
         else:
             raise ValueError(f"Unknown loss_kind: {loss_kind}")
 
@@ -238,14 +238,14 @@ class TestL1UniformDiscreteDirectionalSensitivity(unittest.TestCase):
         z_terminal = zt[-1, 0]
 
         if loss_kind == "linear":
-            loss = z_terminal
+            loss = z_terminal.float()
             dL_dzT = 1.0
         elif loss_kind == "quadratic":
-            loss = 0.5 * z_terminal ** 2
-            dL_dzT = z_terminal.item()
+            loss = 0.5 * z_terminal.float() ** 2
+            dL_dzT = z_terminal.float().item()
         elif loss_kind == "cubic":
-            loss = (z_terminal ** 3) / 3.0
-            dL_dzT = z_terminal.item() ** 2
+            loss = (z_terminal.float() ** 3) / 3.0
+            dL_dzT = (z_terminal.float() ** 2).item()
         else:
             raise ValueError(f"Unknown loss_kind: {loss_kind}")
         

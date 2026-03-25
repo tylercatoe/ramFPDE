@@ -30,7 +30,7 @@ from .odeint import odeint
 from .increment import Euler, RK4, INCREMENTS
 from .fixed_grid_unscaled_uniform import FixedGridODESolverUnscaledUniform
 from .fixed_grid_dynamic_uniform import FixedGridODESolverDynamicUniform
-from .fixed_grid_unscaled_safe import FixedGridODESolverUnscaledSafe
+from .fixed_grid_unscaled_safe_uniform import FixedGridODESolverUnscaledSafeUniform
 from .loss_scalers import DynamicScaler
 from .utils import _is_any_infinite
 
@@ -38,6 +38,6 @@ __all__ = [
     "__version__",
     "odeint", 
     "Euler", "RK4", "INCREMENTS",
-    "FixedGridODESolverUnscaledUniform", "FixedGridODESolverDynamicUniform", "FixedGridODESolverUnscaledSafe",
+    "FixedGridODESolverUnscaledUniform", "FixedGridODESolverDynamicUniform", "FixedGridODESolverUnscaledSafeUniform",
     "DynamicScaler", "_is_any_infinite"
 ]

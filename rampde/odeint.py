@@ -10,7 +10,7 @@ import torch
 from .increment import INCREMENTS, get_increment_function
 from .fixed_grid_unscaled_uniform import FixedGridODESolverUnscaledUniform
 from .fixed_grid_dynamic_uniform import FixedGridODESolverDynamicUniform
-from .fixed_grid_unscaled_safe import FixedGridODESolverUnscaledSafe
+from .fixed_grid_unscaled_safe_uniform import FixedGridODESolverUnscaledSafeUniform
 from .loss_scalers import DynamicScaler
 
 # Type definitions
@@ -98,11 +98,11 @@ def _select_ode_solver(
             return FixedGridODESolverUnscaledUniform, loss_scaler
         else:
             # May need overflow protection for float16
-            return FixedGridODESolverUnscaledSafe, loss_scaler
+            return FixedGridODESolverUnscaledSafeUniform, loss_scaler
     
     else:
         # Default to safe version for unknown scalers
-        return FixedGridODESolverUnscaledSafe, loss_scaler
+        return FixedGridODESolverUnscaledSafeUniform, loss_scaler
 
 
 def odeint(
