@@ -253,7 +253,7 @@ class TestDtypePreservation(unittest.TestCase):
         self.assertEqual(solver, FixedGridODESolverDynamic, "float16 with None should use dynamic solver")
         self.assertIsInstance(scaler, DynamicScaler, "float16 with None should create DynamicScaler")
         
-        # Test float16 with explicit False - should use unscaled safe
+        # Test float16 with explicit False - should use unscaled safe 
         solver, scaler = _select_ode_solver(False, torch.float16)
         self.assertEqual(solver, FixedGridODESolverUnscaledSafe, "float16 with False should use unscaled safe")
         self.assertIsNone(scaler, "float16 with False should have no scaler")

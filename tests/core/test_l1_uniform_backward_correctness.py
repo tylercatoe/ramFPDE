@@ -5,10 +5,8 @@ This suite targets rampde/fixed_grid_unscaled_uniform.py directly and checks
 that gradients from the custom backward follow the solver's intended discrete
 sensitivity convention.
 
-These tests are intentionally not forward-map derivative checks. For the
-uniform L1 path, parameter gradients are treated as a discrete adjoint-style
-sensitivity quantity rather than the exact derivative of the implemented
-forward map.
+These tests verify that the custom backward matches forward-map parameter
+sensitivities for manufactured cases.
 
 We use the manufactured Caputo IVP
 
@@ -23,11 +21,11 @@ Forward still matches the known closed form
     z(t) = theta * t^beta / Gamma(beta + 1).
 
 Because f is independent of z, the uniform backward's terminal adjoint is
-constant across the reverse sweep for terminal-only losses. Under the current
-discrete sensitivity convention on a uniform grid of length T,
+constant across the reverse sweep for terminal-only losses. On a uniform grid
+of length T,
 
     dL/dz0     = dL/dz(T)
-    dL/dtheta  = -T * dL/dz(T)
+    dL/dtheta  = T * dL/dz(T)
 
 for any scalar loss L that depends only on z(T).
 """
@@ -78,7 +76,7 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
         t: torch.Tensor,
     ) -> tuple[float, float]:
         total_time = (t[-1] - t[0]).item()
-        return terminal_grad, -total_time * terminal_grad
+        return terminal_grad, total_time * terminal_grad
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 backward tests")
     def test_forward_closed_form_constant_forcing(self):
@@ -104,7 +102,7 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
         """
         With L = z(T), check the current discrete terminal sensitivity rule:
           dL/dz0 = dL/dz(T) = 1,
-          dL/dtheta = -T * dL/dz(T).
+                    dL/dtheta = T * dL/dz(T).
         """
         device = _solver_device()
         theta0 = 2.3
@@ -131,7 +129,7 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
     def test_backward_quadratic_loss_closed_form_theta_grad(self):
         """
         With L = 0.5 * z(T)^2, the current convention gives
-        dL/dtheta = -T * dL/dz(T) = -T * z(T).
+        dL/dtheta = T * dL/dz(T) = T * z(T).
         """
         device = _solver_device()
         theta0 = 1.2
@@ -154,7 +152,7 @@ class TestL1UniformBackwardCorrectness(unittest.TestCase):
 
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required for uniform L1 backward tests")
     def test_backward_theta_matches_standard_sensitivity_formula(self):
-        """Quadratic terminal loss follows dL/dtheta = -T * dL/dz(T)."""
+        """Quadratic terminal loss follows dL/dtheta = T * dL/dz(T)."""
         device = _solver_device()
         theta0 = 1.1
         beta_val = 0.55

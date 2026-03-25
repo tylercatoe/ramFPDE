@@ -39,10 +39,10 @@ class PolynomialDampedODE(nn.Module):
         #   ∫₀ᴛ (a s² + b s + c) ds = a T³/3 + b T²/2 + c T
         # We fix T=3 and scale the zero‑integral polynomial by 0.5:
         #   (a,b,c) = 0.5 * (1, -3, 2)  ⇒ λ_max ≈ 1 → avoids fp16 overflow
-        self.T = 2.65
-        self.a = nn.Parameter(torch.tensor(8, dtype=torch.float32))    # 0.5 * 1
-        self.b = nn.Parameter(torch.tensor(-10, dtype=torch.float32))   # 0.5 * (-3)
-        self.c = nn.Parameter(torch.tensor(2**(-16), dtype=torch.float32))    # 0.5 * 2
+        self.T = 3 #2.65
+        self.a = nn.Parameter(torch.tensor(0.5, dtype=torch.float32))    # 8 # 0.5 * 1
+        self.b = nn.Parameter(torch.tensor(-1.5, dtype=torch.float32))   # 10 # 0.5 * (-3)
+        self.c = nn.Parameter(torch.tensor(1.0, dtype=torch.float32))    # 2(-16) # 0.5 * 2
 
     def forward(self, t: torch.Tensor, y: torch.Tensor):
         """

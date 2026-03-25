@@ -63,8 +63,6 @@ class TestTaylorExpansionODE(unittest.TestCase):
     def _run_taylor_test(self, method, precision, scale_input=0, scale_weights=0, scale_time=0):
         if method == 'l1' and scale_time > 0:
             self.skipTest("FixedGridODESolverUnscaledUniform backward does not support gradients w.r.t. time grid")
-        if method == 'l1' and scale_weights > 0:
-            self.skipTest("Uniform L1 uses a standard sensitivity convention for parameters, so Taylor checks against forward-map parameter derivatives are not applicable")
 
         # Skip RK4 float16 time gradient tests - they're fundamentally unstable due to
         # the higher-order method's sensitivity combined with float16 precision limits
