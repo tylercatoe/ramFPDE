@@ -1,14 +1,26 @@
 #!/bin/bash
 # run_stl10_fractional.sh - STL10 fractional (L1) rampde experiments
 # Usage: chmod +x run_experiment.sh ; ./run_experiment.sh
+set -euo pipefail
+
+module load anaconda3/2023.09-0
+eval "$(conda shell.bash hook)"
+
+if ! conda run -n torch28 python -c "import torch, torchvision, pandas, matplotlib" >/dev/null 2>&1; then
+  echo "Missing dependencies in env 'torch28'. Run:"
+  echo "  conda run -n torch28 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+  echo "  conda run -n torch28 pip install pandas matplotlib"
+  echo "  conda run -n torch28 pip install -e /home/tcatoe/home_FDNN/ramFPDE/ramFPDE"
+  exit 1
+fi
 
 default_args=(
-  --batch_size 16
+  --batch_size 4
   --nepochs 160
   --lr 0.05
   --momentum 0.9
   --weight_decay 1e-4
-  --width 128
+  --width 64
   --results_dir ./raw_data
   --method l1
   --beta 0.6

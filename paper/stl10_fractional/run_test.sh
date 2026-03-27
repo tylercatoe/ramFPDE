@@ -1,18 +1,30 @@
 #!/bin/bash
 # run_stl10_fractional_test.sh - quick STL10 fractional smoke runs
 # Usage: chmod +x run_test.sh && ./run_test.sh
+set -euo pipefail
+
+module load anaconda3/2023.09-0
+eval "$(conda shell.bash hook)"
+
+if ! conda run -n torch28 python -c "import torch, torchvision, pandas, matplotlib" >/dev/null 2>&1; then
+  echo "Missing dependencies in env 'torch28'. Run:"
+  echo "  conda run -n torch28 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+  echo "  conda run -n torch28 pip install pandas matplotlib"
+  echo "  conda run -n torch28 pip install -e /home/tcatoe/home_FDNN/ramFPDE/ramFPDE"
+  exit 1
+fi
 
 echo "Running STL10 fractional test experiments"
 echo "========================================="
 
 test_args=(
-  --batch_size 16
+  --batch_size 4
   --nepochs 3
   --lr 0.05
   --momentum 0.9
   --weight_decay 5e-4
   --test_freq 1
-  --width 128
+  --width 64
   --results_dir ./raw_data
   --method l1
   --beta 0.6

@@ -197,7 +197,7 @@ class MPNODE_STL10(nn.Module):
 
         # 2) ODE block #1
         if args.odeint == 'rampde' and dynamic_scaler_enabled and ScalerClass is not None:
-            S1 = ScalerClass(precision)
+            S1 = ScalerClass(precision, target_factor = 128, max_attempts = 150)
         elif args.odeint == 'rampde' and args.precision == 'float16' and not dynamic_scaler_enabled:
             # Explicitly disable internal scaler when using external GradScaler  
             S1 = False
@@ -207,7 +207,7 @@ class MPNODE_STL10(nn.Module):
             ODEFunc(ch, t_grid, is_stable=args.stable),
             t_grid,
             solver=args.method,
-            steps=4,
+            steps=10,
             loss_scaler=S1,
             odeint_func=odeint_func,
             beta=beta,
@@ -221,7 +221,7 @@ class MPNODE_STL10(nn.Module):
 
         # 4) ODE block #2
         if args.odeint == 'rampde' and dynamic_scaler_enabled and ScalerClass is not None:
-            S2 = ScalerClass(precision)
+            S2 = ScalerClass(precision, target_factor = 128, max_attempts = 150)
         elif args.odeint == 'rampde' and args.precision == 'float16' and not dynamic_scaler_enabled:
             # Explicitly disable internal scaler when using external GradScaler
             S2 = False
@@ -231,7 +231,7 @@ class MPNODE_STL10(nn.Module):
             ODEFunc(2 * ch, t_grid, is_stable=args.stable),
             t_grid,
             solver=args.method,
-            steps=4,
+            steps=10,
             loss_scaler=S2,
             odeint_func=odeint_func,
             beta=beta,
@@ -241,7 +241,7 @@ class MPNODE_STL10(nn.Module):
         self.norm4 = nn.InstanceNorm2d(4*ch, affine=True)
         
         if args.odeint == 'rampde' and dynamic_scaler_enabled and ScalerClass is not None:
-            S3 = ScalerClass(precision)
+            S3 = ScalerClass(precision, target_factor = 128, max_attempts = 150)
         elif args.odeint == 'rampde' and args.precision == 'float16' and not dynamic_scaler_enabled:
             # Explicitly disable internal scaler when using external GradScaler
             S3 = False
@@ -251,7 +251,7 @@ class MPNODE_STL10(nn.Module):
             ODEFunc(4 * ch, t_grid, is_stable=args.stable),
             t_grid,
             solver=args.method,
-            steps=4,
+            steps=10,
             loss_scaler=S3,
             odeint_func=odeint_func,
             beta=beta,
@@ -416,6 +416,11 @@ def makedirs(dirname):
 
 
 def main():
+    torch.backends.cudnn.enabled = False
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = False
+    print("cudnn enabled:", torch.backends.cudnn.enabled)
+    
     # Create parser and parse arguments
     parser = create_parser()
     args = parser.parse_args()

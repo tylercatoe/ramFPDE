@@ -6,14 +6,17 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
+set -euo pipefail
 
-# Load conda - use environment variable with default fallback
-CONDA_BASE=${CONDA_BASE:-/local/scratch/lruthot/miniconda3}
-source ${CONDA_BASE}/etc/profile.d/conda.sh
-conda activate torch28
+# Load conda from module system.
+module load anaconda3/2023.09-0
+eval "$(conda shell.bash hook)"
 
 echo "Job ID: $SLURM_JOB_ID"
 echo "Running on nodes: $SLURM_NODELIST"
 
+# Validate runtime environment once per job.
+conda run -n torch28 python -c "import torch, torchvision, pandas, matplotlib; print('env-ok', torch.__version__)"
+
 # Run evaluation script
-python -u evaluate_checkpoints.py "$@"
+conda run -n torch28 python -u evaluate_checkpoints.py "$@"
