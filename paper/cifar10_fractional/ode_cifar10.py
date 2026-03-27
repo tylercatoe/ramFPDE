@@ -31,10 +31,12 @@ def create_parser():
     parser.add_argument('--momentum', type=float, default=0.9, help='Momentum for optimizer')
     parser.add_argument('--test_batch_size', type=int, default=100, help='Batch size for testing')
 
-    parser.add_argument('--precision', type=str, default='float32', choices=['float16', 'bfloat16', 'float32'], help='Precision for training')
-    #parser.add_argument('--unstable', action='store_true', help='Use unstable ODE formulation (default: stable)')
-    #parser.add_argument('--no_grad_scaler', action='store_true', help='Disable GradScaler for torchdiffeq with float16 (default: enabled)')
-    #parser.add_argument('--no_dynamic_scaler', action='store_true', help='Disable DynamicScaler for rampde with float16 (default: enabled)')
+    parser.add_argument('--precision', type=str, default='float32', choices=['float16', 'bfloat16', 'float32', 'tfloat32'], help='Precision for training')
+    parser.add_argument('--method', type=str, default='l1', choices=['l1'], help='Integration method')
+    parser.add_argument('--odeint', type=str, default='rampde', choices=['rampde', 'torchdiffeq'], help='ODE solver backend')
+    parser.add_argument('--unstable', action='store_true', help='Use unstable ODE formulation (default: stable)')
+    parser.add_argument('--no_grad_scaler', action='store_true', help='Disable GradScaler for float16')
+    parser.add_argument('--no_dynamic_scaler', action='store_true', help='Disable DynamicScaler for rampde float16')
     parser.add_argument('--results_dir', type=str, default='./results')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--debug', action='store_true')
@@ -157,8 +159,8 @@ class MPNODE_CIFAR10(nn.Module):
         # Create time grid on appropriate device
         device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
         t_grid = torch.linspace(0, 1.0, 5, device = device)
-        # 1) step: 3x32x32 -> 64x32x32
-        self.stem = nn.Conv3d(3, ch, 3, padding=1, bias=True)
+        # 1) stem: 3x32x32 -> chx32x32
+        self.stem = nn.Conv2d(3, ch, 3, padding=1, bias=True)
         self.norm1 = nn.InstanceNorm2d(ch, affine = True)
 
         # 3) FODE block #1 
@@ -275,26 +277,26 @@ def get_cifar10_loaders(batch_size=128,
         transforms.Normalize(mean, std)
     ])
 
-    # ----- full train set (load twice with different transforms) -----
-    full_train_aug = CIFAR10(root='.data/cifar10', split='train', download=True, transform=transform_train)
-    full_train_eval = CIFAR10(root='.data/cifar10', split='train', download=True, transform=transform_test)
+    # ----- full train/test sets -----
+    full_train_aug = CIFAR10(root='.data/cifar10', train=True, download=True, transform=transform_train)
+    full_train_eval = CIFAR10(root='.data/cifar10', train=True, download=True, transform=transform_test)
+    test_set = CIFAR10(root='.data/cifar10', train=False, download=True, transform=transform_test)
 
-    # ----- deterministic split -----
-    # use provided seed for data splie or default to 42 for backward compatibility
+    # ----- deterministic train subset -----
+    # use provided seed for data split or default to 42 for backward compatibility
     split_seed = seed if seed is not None else 42
     g = torch.Generator().manual_seed(split_seed)
-    idx = torch.randperm(len(full_train_aug), generator=g)
-    idx_train, idx_val = idx[:int(50000*perc)], idx[int(50000*perc):] # 50k/10k split
+    n_train = max(1, int(len(full_train_aug) * perc))
+    idx_train = torch.randperm(len(full_train_aug), generator=g)[:n_train]
 
     train_set = Subset(full_train_aug, idx_train.tolist())
-    val_set = Subset(full_train_eval, idx_val.tolist())
     train_eval_set = Subset(full_train_eval, idx_train.tolist())
 
     # ----- loaders with proper seeding -----
     train_loader = DataLoader(train_set, batch_size=batch_size,
                               shuffle=True,  num_workers=2, drop_last=True,
                               worker_init_fn=worker_init_fn)
-    val_loader   = DataLoader(val_set,   batch_size=test_batch_size,
+    val_loader   = DataLoader(test_set,   batch_size=test_batch_size,
                               shuffle=False, num_workers=2,
                               worker_init_fn=worker_init_fn)
     train_eval_loader   = DataLoader(train_eval_set,   batch_size=test_batch_size,
@@ -352,6 +354,10 @@ def makedirs(dirname):
 
 
 def main():
+    # cuDNN can fail to initialize on some cluster nodes; use robust fallback.
+    torch.backends.cudnn.enabled = False
+    torch.backends.cudnn.benchmark = False
+
     # Create parser and parse arguments
     parser = create_parser()
     args = parser.parse_args()
@@ -402,7 +408,7 @@ def main():
     }
     
     result_dir, ckpt_path, folder_name, device, log_file = setup_experiment(
-        args.results_dir, "ode_cifar10", "cifar10", args.precision,
+        args.results_dir, "ode_cifar10_fractional", "cifar10", args.precision,
         args.odeint, args.method, args.seed, args.gpu, scaler_name,
         extra_params=extra_params, args=args
     )
@@ -412,8 +418,15 @@ def main():
     
     try:
         # Create model
-        model = MPNODE_CIFAR10(args.width, args, precision, odeint_func, DynamicScaler, 
-                           dynamic_scaler_enabled, grad_scaler_enabled).to(device)
+        model = MPNODE_CIFAR10(
+            args.width,
+            args,
+            precision,
+            odeint_func=odeint_func,
+            ScalerClass=DynamicScaler,
+            dynamic_scaler_enabled=dynamic_scaler_enabled,
+            grad_scaler_enabled=grad_scaler_enabled,
+        ).to(device)
         print(model)
         print('Number of parameters: {}'.format(count_parameters(model)))
 
