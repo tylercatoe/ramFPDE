@@ -17,8 +17,8 @@ Dataset: CIFAR-10:
 ## Files
 
 -   `ode_cifar10.py`: Neural FODE classifier training script
--   `run_experiment.py`: Full experiment runner (submits SLURM jobs)
--   `run_test.py`: Quick test runner (local execution, 3 epochs)
+-   `run_experiment.sh`: Full experiment runner (submits SLURM jobs)
+-   `run_test.sh`: Quick test runner (local execution, 3 epochs)
 -   `job_ode_cifar10.sbatch`: SLURMM batch job template
 -   `plot_cifar10_convergence.py`: Generate training convergence plots
 -   `generate_cifar10_table.py`: Generate performance comparison table
