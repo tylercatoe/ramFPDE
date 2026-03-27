@@ -30,6 +30,7 @@ Dataset: CIFAR-10:
 ```
 
 **Expected runtime**: ?? 20-30 ?? minutes per job
+
 **What it does**:
 -   Trains for 3 epochs (vs 100+ in production)
 -   Tests every epoch (3 validation points)
@@ -42,7 +43,7 @@ Dataset: CIFAR-10:
 ./run_experiment.sh
 ```
 
-**Expected runtimes**: ?? 5 - 20 ?? hoursper configuration depending on GPU
+**Expected runtimes**: ?? 5 - 20 ?? hours per configuration depending on GPU
 **What it does**: 
 -   Trains neural FODE classifier for 160 epochs
 
