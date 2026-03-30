@@ -85,8 +85,8 @@ class TestPrecisionGain(unittest.TestCase):
                 with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=True):
                     z_final_mp = _run_forward(ode_func, z0.to(torch.float32), t, beta)
                 z_final_lp = _run_forward(ode_func, z0.to(torch.float16), t, beta)
-                mp_error = torch.abs(z_final_mp - exact_final)
-                lp_error = torch.abs(z_final_lp - exact_final)
+                mp_error = (z_final_mp.to(torch.float64) - torch.as_tensor(exact_final, device=device, dtype=torch.float64)).abs()
+                lp_error = (z_final_lp.to(torch.float64) - torch.as_tensor(exact_final, device=device, dtype=torch.float64)).abs()
                 print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
                 print(" " * 10 + f"Constant Forcing - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
                 print()
@@ -115,8 +115,8 @@ class TestPrecisionGain(unittest.TestCase):
                 with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=True):
                     z_final_mp = _run_forward(ode_func, z0.to(torch.float32), t, beta)
                 z_final_lp = _run_forward(ode_func, z0.to(torch.float16), t, beta)
-                mp_error = torch.abs(z_final_mp - exact_final)
-                lp_error = torch.abs(z_final_lp - exact_final)
+                mp_error = (z_final_mp.to(torch.float64) - torch.as_tensor(exact_final, device=device, dtype=torch.float64)).abs()
+                lp_error = (z_final_lp.to(torch.float64) - torch.as_tensor(exact_final, device=device, dtype=torch.float64)).abs()
                 print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
                 print(" " * 10 + f"Polynomial Forcing - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
                 print()
@@ -144,8 +144,8 @@ class TestPrecisionGain(unittest.TestCase):
             with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=True):
                 z_final_mp = _run_forward(ode_func, z0.to(torch.float32), t, beta)
             z_final_lp = _run_forward(ode_func, z0.to(torch.float16), t, beta)
-            mp_error = torch.abs(z_final_mp - exact_final)
-            lp_error = torch.abs(z_final_lp - exact_final)
+            mp_error = (z_final_mp.to(torch.float64) - torch.as_tensor(exact_final, device=device, dtype=torch.float64)).abs()
+            lp_error = (z_final_lp.to(torch.float64) - torch.as_tensor(exact_final, device=device, dtype=torch.float64)).abs()
             print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
             print(" " * 10 + f"Linear Decay - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
             print()
