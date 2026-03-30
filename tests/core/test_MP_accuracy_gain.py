@@ -128,7 +128,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 200, 2.0        
+        N, T = 200, torch.tensor(2.0)
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.ones(1, device=device)
 
