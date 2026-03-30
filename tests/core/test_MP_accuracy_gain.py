@@ -70,7 +70,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 25, 1.0
+        N, T = 100, 1.0
         c = 1.0
         ode_func = ConstantForcing(c)        
         t = torch.linspace(0.0, T, N, device=device)
@@ -78,8 +78,7 @@ class TestPrecisionGain(unittest.TestCase):
 
         for beta_val in [0.3, 0.5, 0.7, 0.9, 1.0]:
             beta = beta_val
-            exact_final = torch.full_like(z0, c * (t[-1] ** beta) / gamma_fn(beta + 1))
-            exact_final = torch.tensor(exact_final, device=device, dtype = torch.float64)
+            exact_final = torch.full_like(z0, c * (t[-1] ** beta) / gamma_fn(beta + 1)).to(torch.float64)
 
             with self.subTest(beta=beta_val):
                 print(" " * 5 + f"Testing beta = {beta_val}")
@@ -100,7 +99,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 25, 2.0        
+        N, T = 100, 2.0        
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.zeros(1, device=device)
 
@@ -132,13 +131,13 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 25, torch.tensor(2.0, device=device)
+        N, T = 100, torch.tensor(2.0, device=device)
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.ones(1, device=device)
 
         beta = 1.0
         
-        exact_final = torch.tensor(torch.exp(-T), device=device, dtype = torch.float64)
+        exact_final = torch.exp(-T).to(torch.float64)
         ode_func = LinearDecay()
 
         with self.subTest(beta=beta):
