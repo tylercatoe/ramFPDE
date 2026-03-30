@@ -17,7 +17,7 @@ fi
 
 # Default training arguments
 default_args=(
-  --batch_size  16 
+  --batch_size  4 
   --nepochs   160
   --lr 0.05
   --momentum 0.9
@@ -38,7 +38,7 @@ seed=25
 mkdir -p slurm_logs
 echo "CIFAR10 Test Configuration:"
 echo "  -   Epochs: 160"
-echo "  -   Batch size: 16"
+echo "  -   Batch size: 4"
 echo "  -   Test frequency: every 10 epochs"
 echo "  -   Seed: $seed (vs 25 in production)"
 echo "  -   Results dir: $results_dir"

@@ -2,7 +2,7 @@
 #SBATCH --job-name=ode_cifar10_fractional
 #SBATCH --output=slurm_logs/ode_cifar10_fractional_%j.out
 #SBATCH --error=slurm_logs/ode_cifar10_fractional_%j.err
-#SBATCH --partition=gpu-a100
+#SBATCH --partition=work1
 #SBATCH --time=24:00:00
 #SBATCH --gres=gpu:1
 #SBATCH --mem=32G
