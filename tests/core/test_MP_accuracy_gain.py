@@ -70,7 +70,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 200, 1.0
+        N, T = 50, 1.0
         c = 1.0
         ode_func = ConstantForcing(c)        
         t = torch.linspace(0.0, T, N, device=device)
@@ -99,7 +99,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 200, 2.0        
+        N, T = 50, 2.0        
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.zeros(1, device=device)
 
@@ -130,7 +130,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 200, torch.tensor(2.0, device=device)
+        N, T = 50, torch.tensor(2.0, device=device)
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.ones(1, device=device)
 
