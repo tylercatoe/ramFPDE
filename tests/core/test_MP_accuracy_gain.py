@@ -74,7 +74,7 @@ class TestPrecisionGain(unittest.TestCase):
         c = 1.0
         ode_func = ConstantForcing(c)        
         t = torch.linspace(0.0, T, N, device=device)
-        z0 = torch.zeros(1, device=torch.device)
+        z0 = torch.zeros(1, device=device)
 
         for beta_val in [0.3, 0.5, 0.7, 0.9, 1.0]:
             beta = beta_val
@@ -82,12 +82,15 @@ class TestPrecisionGain(unittest.TestCase):
 
             with self.subTest(beta=beta_val):
                 print(" " * 5 + f"Testing beta = {beta_val}")
-                z_final_mp = _run_forward(ode_func, z0.to(torch.float32), t, beta)
+                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=True):
+                    z_final_mp = _run_forward(ode_func, z0.to(torch.float32), t, beta)
                 z_final_lp = _run_forward(ode_func, z0.to(torch.float16), t, beta)
                 mp_error = torch.abs(z_final_mp - exact_final)
                 lp_error = torch.abs(z_final_lp - exact_final)
                 mp_lp_gain = lp_error / mp_error if mp_error > 0 else float('inf')
+                print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
                 print(" " * 10 + f"Constant Forcing - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
+                print()
 
 
 if __name__ == "__main__":
