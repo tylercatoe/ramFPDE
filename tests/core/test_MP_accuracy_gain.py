@@ -98,7 +98,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 200, 1.0        
+        N, T = 200, 2.0        
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.zeros(1, device=device)
 
@@ -118,6 +118,34 @@ class TestPrecisionGain(unittest.TestCase):
                 lp_error = torch.abs(z_final_lp - exact_final)
                 print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
                 print(" " * 10 + f"Polynomial Forcing - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
+                print()
+
+
+
+    def test_linear_decay(self):
+        print()
+        print("-" * 60 + "Testing Linear Decay ODE" + "-" * 60)
+        print()
+
+        device = _solver_device()
+        N, T = 200, 2.0        
+        t = torch.linspace(0.0, T, N, device=device)
+        z0 = torch.ones(1, device=device)
+
+        for beta_val in [0.3, 0.5, 0.7, 0.9, 1.0]:
+            beta = beta_val
+            exact_final = torch.exp(-T)
+            ode_func = LinearDecay()
+
+            with self.subTest(beta=beta_val):
+                print(" " * 5 + f"Testing beta = {beta_val}")
+                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=True):
+                    z_final_mp = _run_forward(ode_func, z0.to(torch.float32), t, beta)
+                z_final_lp = _run_forward(ode_func, z0.to(torch.float16), t, beta)
+                mp_error = torch.abs(z_final_mp - exact_final)
+                lp_error = torch.abs(z_final_lp - exact_final)
+                print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
+                print(" " * 10 + f"Linear Decay - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
                 print()
 
 
