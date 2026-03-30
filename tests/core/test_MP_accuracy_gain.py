@@ -57,9 +57,10 @@ def _run_forward(ode_func, z0, t, beta):
     ode_func = ode_func.to(z0.device)
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, module="rampde")
-        solver = FixedGridODESolverBase(ode_func, t, L1(), beta=beta)
-        z_final = solver(z0)
-    return z_final
+        with torch.no_grad():
+            zt = FixedGridODESolverBase.apply(L1(), ode_func, z0, beta, t, None, *params)
+        
+    return zt[-1]
 
 
 class TestPrecisionGain(unittest.TestCase):
