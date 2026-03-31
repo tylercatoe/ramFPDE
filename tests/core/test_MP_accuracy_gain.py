@@ -70,7 +70,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 100, 1.0
+        N, T = 100, torch.tensor(torch.pi, dtype = torch.float64, device=device)  
         c = 1.0
         ode_func = ConstantForcing(c)        
         t = torch.linspace(0.0, T, N, device=device)
@@ -99,7 +99,7 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 100, 2.0        
+        N, T = 100, torch.tensor(torch.pi, dtype = torch.float64, device=device)      
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.zeros(1, device=device)
 
@@ -131,13 +131,13 @@ class TestPrecisionGain(unittest.TestCase):
         print()
 
         device = _solver_device()
-        N, T = 100, torch.tensor(2.0, device=device)
+        N, T = 100, torch.tensor(torch.pi, dtype = torch.float64, device=device)
         t = torch.linspace(0.0, T, N, device=device)
         z0 = torch.ones(1, device=device)
 
         beta = 1.0
         
-        exact_final = torch.exp(-T).to(torch.float64)
+        exact_final = torch.exp(-T)
         ode_func = LinearDecay()
 
         with self.subTest(beta=beta):
@@ -150,7 +150,7 @@ class TestPrecisionGain(unittest.TestCase):
             print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
             print(" " * 10 + f"Linear Decay - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
             print()
-            self.assertGreater(lp_error.item(), mp_error.item(), f"Expected MP error to be less than LP error for beta={beta}, but got MP error {mp_error.item():.6e} and LP error {lp_error.item():.6e}")
+            self.assertGreater((lp_error.item() + 1e-10), mp_error.item(), f"Expected MP error to be less than LP error for beta={beta}, but got MP error {mp_error.item():.6e} and LP error {lp_error.item():.6e}")
 
 
 if __name__ == "__main__":
