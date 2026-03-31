@@ -570,8 +570,8 @@ def main():
             train_loss_meter.update(loss.item())
             mem_meter.update(peak_memory)
 
-            # evaluate / log every test_freq steps
-            if itr % batches_per_epoch*args.test_freq == 0:
+            # Evaluate/log every `test_freq` epochs.
+            if itr % (batches_per_epoch * args.test_freq) == 0:
                 epoch = itr // batches_per_epoch
 
                 with torch.no_grad():
@@ -584,17 +584,21 @@ def main():
                             best_acc = val_acc
 
                     current_lr = optimizer.param_groups[0]['lr']
-                    print(
+                    metrics_line = (
                         "Iter {:06d} | Epoch {:04d} | LR {:.4f} | "
                         "Running Loss {:.4f} | Train Loss {:.4f} | Val Loss {:.4f} | "
                         "Fwd {:.3f}s | Bwd {:.3f}s | "
-                        "Train Acc {:.4f} | Val Acc {:.4f} | Max Mem {:.1f}MB".format(
-                            itr, epoch, current_lr,
-                            train_loss_meter.val, train_loss, val_loss,
-                            fwd_time_meter.avg, bwd_time_meter.avg,
-                            train_acc, val_acc, mem_meter.max
-                        )
+                        "Train Acc {:.4f} | Val Acc {:.4f} | Max Mem {:.1f}MB"
+                    ).format(
+                        itr, epoch, current_lr,
+                        train_loss_meter.val, train_loss, val_loss,
+                        fwd_time_meter.avg, bwd_time_meter.avg,
+                        train_acc, val_acc, mem_meter.max
                     )
+                    print(metrics_line)
+                    # Also mirror periodic metrics to SLURM stdout (.out file).
+                    if sys.stdout is not sys.__stdout__:
+                        print(metrics_line, file=sys.__stdout__, flush=True)
 
                 # write metrics row
                 writer.writerow([

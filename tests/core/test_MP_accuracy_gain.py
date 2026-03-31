@@ -106,7 +106,6 @@ class TestPrecisionGain(unittest.TestCase):
         for beta_val in [0.3, 0.5, 0.7, 0.9, 1.0]:
             beta = beta_val
             exact_final = T ** 2
-            exact_final = torch.tensor(exact_final, device=device, dtype = torch.float64)
             coeff = 2.0 / gamma_fn(3.0 - beta)
             exponent = 2.0 - beta_val
             ode_func = PolyForcing(coeff, exponent)
