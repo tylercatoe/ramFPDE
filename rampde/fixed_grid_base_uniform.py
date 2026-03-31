@@ -68,7 +68,7 @@ class FixedGridODESolverBase(torch.autograd.Function):
             try:
                 autocast_enabled = torch.is_autocast_enabled(device_type)
             except TypeError:
-                autocast_enabled = torch.is_autocast_enabled() if device_type == "cuda" else False
+                autocast_enabled = torch.is_autocast_enabled() 
 
 
             # Determine precision levels
