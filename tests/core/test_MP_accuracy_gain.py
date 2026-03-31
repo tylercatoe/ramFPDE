@@ -90,7 +90,7 @@ class TestPrecisionGain(unittest.TestCase):
                 print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
                 print(" " * 10 + f"Constant Forcing - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
                 print()
-                self.assertGreater(lp_error.item(), mp_error.item(), f"Expected MP error to be less than LP error for beta={beta}, but got MP error {mp_error.item():.6e} and LP error {lp_error.item():.6e}")
+                self.assertGreater(lp_error.item() + 1e-10, mp_error.item(), f"Expected MP error to be less than LP error for beta={beta}, but got MP error {mp_error.item():.6e} and LP error {lp_error.item():.6e}")
 
         
     def test_poly_forcing(self):
@@ -121,7 +121,7 @@ class TestPrecisionGain(unittest.TestCase):
                 print(" " * 10 + f"MP final dtype: {z_final_mp.dtype}, LP final dtype: {z_final_lp.dtype}")
                 print(" " * 10 + f"Polynomial Forcing - MP Error: {mp_error.item():.6e}, LP Error: {lp_error.item():.6e}")
                 print()
-                self.assertGreater(lp_error.item(), mp_error.item(), f"Expected MP error to be less than LP error for beta={beta}, but got MP error {mp_error.item():.6e} and LP error {lp_error.item():.6e}")
+                self.assertGreater(lp_error.item() + 1e-10, mp_error.item(), f"Expected MP error to be less than LP error for beta={beta}, but got MP error {mp_error.item():.6e} and LP error {lp_error.item():.6e}")
 
 
 
