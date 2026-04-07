@@ -20,7 +20,7 @@ echo "========================================="
 results_dir="./raw_data"
 seed=26
 
-test_args=(
+test_args_adjoint=(
   --batch_size 64
   --test_batch_size 128
   --nepochs 3
@@ -34,6 +34,28 @@ test_args=(
   --precision float32
   --method l1
   --odeint rampde
+  --seed "$seed"
+  --no_grad_scaler
+  --no_dynamic_scaler
+  --results_dir "$results_dir"
+  --beta 0.6
+  --adjoint
+)
+
+test_args_backprop=(
+  --batch_size 64
+  --test_batch_size 128
+  --nepochs 3
+  --lr 0.05
+  --momentum 0.9
+  --weight_decay 1e-4
+  --test_freq 1
+  --width 64
+  --h 0.1
+  --T 1.0
+  --precision float32
+  --method l1
+  --odeint torchfde
   --seed "$seed"
   --no_grad_scaler
   --no_dynamic_scaler
@@ -53,11 +75,14 @@ echo "  - Seed: $seed"
 echo "  - Results dir: $results_dir"
 echo ""
 
-echo "Submitting: MNIST float32 no-scaling"
-sbatch job_ode_mnist.sbatch "${test_args[@]}"
+echo "Submitting: MNIST float32 adjoint test"
+sbatch job_ode_mnist.sbatch "${test_args_adjoint[@]}"
+
+echo "Submitting: MNIST float32 backprop test"
+sbatch job_ode_mnist.sbatch "${test_args_backprop[@]}"
  
 echo ""
-echo "MNIST test submitted."
+echo "MNIST tests submitted."
 echo "Monitor progress with:"
 echo "  watch -n 30 'squeue -u \$USER | grep mnist'"
 echo "  tail -f slurm_logs/ode_mnist_*.out"

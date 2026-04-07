@@ -28,13 +28,26 @@ import numpy as np
 import pandas as pd
 
 
+FLOAT_TOKEN = r"(?:[-+0-9.eE]+|nan|inf|-inf)"
+
 EPOCH_LINE_RE = re.compile(
     r"Epoch\s+(?P<epoch>\d+)\s+\|\s+"
-    r"Time\s+(?P<time_val>[-+0-9.eE]+)\s+\((?P<time_avg>[-+0-9.eE]+)\)\s+\|\s+"
-    r"NFE-F\s+(?P<nfe_f>[-+0-9.eE]+)\s+\|\s+"
-    r"NFE-B\s+(?P<nfe_b>[-+0-9.eE]+)\s+\|\s+"
-    r"Train Acc\s+(?P<train_acc>[-+0-9.eE]+)\s+\|\s+"
-    r"Test Acc\s+(?P<test_acc>[-+0-9.eE]+)"
+    rf"Time\s+(?P<time_val>{FLOAT_TOKEN})\s+\((?P<time_avg>{FLOAT_TOKEN})\)\s+\|\s+"
+    rf"NFE-F\s+(?P<nfe_f>{FLOAT_TOKEN})\s+\|\s+"
+    rf"NFE-B\s+(?P<nfe_b>{FLOAT_TOKEN})"
+    rf"(?:\s+\|\s+Loss\s+(?P<train_loss>{FLOAT_TOKEN}))?\s+\|\s+"
+    rf"Train Acc\s+(?P<train_acc>{FLOAT_TOKEN})\s+\|\s+"
+    rf"Test Acc\s+(?P<test_acc>{FLOAT_TOKEN})"
+)
+
+FINAL_METRICS_RE = re.compile(
+    r"FINAL_METRICS\s+\|\s+Method\s+(?P<method>\w+)\s+\|\s+"
+    rf"TestErrorPct\s+(?P<test_error_pct>{FLOAT_TOKEN})\s+\|\s+"
+    rf"TrainGPUMemMB\s+(?P<train_gpu_mem_mb>{FLOAT_TOKEN})\s+\|\s+"
+    rf"TrainTimeSec\s+(?P<train_time_sec>{FLOAT_TOKEN})\s+\|\s+"
+    rf"InferenceGPUMemMB\s+(?P<inference_gpu_mem_mb>{FLOAT_TOKEN})\s+\|\s+"
+    rf"InferenceTimeSec\s+(?P<inference_time_sec>{FLOAT_TOKEN})\s+\|\s+"
+    rf"InferenceTestAcc\s+(?P<inference_test_acc>{FLOAT_TOKEN})"
 )
 
 
@@ -43,6 +56,7 @@ class RunData:
     run_dir: Path
     args_row: pd.Series
     metrics: pd.DataFrame
+    final_metrics: dict[str, float]
 
 
 def _find_log_file(run_dir: Path) -> Optional[Path]:
@@ -63,21 +77,42 @@ def _read_args_row(run_dir: Path) -> Optional[pd.Series]:
     return args_df.iloc[0]
 
 
-def _parse_metrics_from_log(log_file: Path) -> pd.DataFrame:
+def _to_float(value: str) -> float:
+    low = value.strip().lower()
+    if low == "nan":
+        return float("nan")
+    if low == "inf":
+        return float("inf")
+    if low == "-inf":
+        return float("-inf")
+    return float(value)
+
+
+def _parse_metrics_from_log(log_file: Path) -> tuple[pd.DataFrame, dict[str, float]]:
     rows = []
+    final_metrics: dict[str, float] = {}
     for line in log_file.read_text(errors="ignore").splitlines():
         match = EPOCH_LINE_RE.search(line)
-        if not match:
-            continue
-        row = {k: float(v) for k, v in match.groupdict().items() if k != "epoch"}
-        row["epoch"] = int(match.group("epoch"))
-        rows.append(row)
+        if match:
+            row = {}
+            for k, v in match.groupdict().items():
+                if k == "epoch":
+                    continue
+                row[k] = _to_float(v) if v is not None else float("nan")
+            row["epoch"] = int(match.group("epoch"))
+            rows.append(row)
+
+        final_match = FINAL_METRICS_RE.search(line)
+        if final_match:
+            parsed = {k: _to_float(v) for k, v in final_match.groupdict().items() if k != "method"}
+            parsed["method"] = final_match.group("method")
+            final_metrics = parsed
     if not rows:
-        return pd.DataFrame()
+        return pd.DataFrame(), final_metrics
     df = pd.DataFrame(rows).sort_values("epoch").reset_index(drop=True)
     # Helpful timing transforms for presentation.
     df["time_delta_sec"] = df["time_val"].diff().fillna(df["time_val"]).clip(lower=0.0)
-    return df
+    return df, final_metrics
 
 
 def load_runs(
@@ -108,11 +143,11 @@ def load_runs(
         if log_file is None:
             continue
 
-        metrics = _parse_metrics_from_log(log_file)
+        metrics, final_metrics = _parse_metrics_from_log(log_file)
         if metrics.empty:
             continue
 
-        runs.append(RunData(run_dir=run_dir, args_row=args_row, metrics=metrics))
+        runs.append(RunData(run_dir=run_dir, args_row=args_row, metrics=metrics, final_metrics=final_metrics))
     return runs
 
 
@@ -121,6 +156,7 @@ def to_epoch_dataframe(runs: list[RunData]) -> pd.DataFrame:
     for run in runs:
         df = run.metrics.copy()
         df["run_name"] = run.run_dir.name
+        df["train_method"] = get_method_label(run.args_row)
         for key in ["seed", "width", "h", "T", "beta", "precision_str", "odeint_type", "method"]:
             if key in run.args_row:
                 df[key] = run.args_row[key]
@@ -128,6 +164,20 @@ def to_epoch_dataframe(runs: list[RunData]) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+def _as_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if pd.isna(value):
+        return False
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y"}
+
+
+def get_method_label(args_row: pd.Series) -> str:
+    if _as_bool(args_row.get("adjoint", False)):
+        return "Adjoint"
+    return "Backprop"
 
 
 def to_summary_dataframe(epoch_df: pd.DataFrame) -> pd.DataFrame:
@@ -215,6 +265,42 @@ def plot_runtime_nfe(epoch_df: pd.DataFrame, outdir: Path) -> None:
     plt.close(fig)
 
 
+def plot_loss_curves_by_method(epoch_df: pd.DataFrame, outdir: Path) -> Optional[Path]:
+    if "train_loss" not in epoch_df.columns:
+        return None
+
+    loss_df = epoch_df.dropna(subset=["train_loss"]).copy()
+    if loss_df.empty:
+        return None
+
+    agg = (
+        loss_df.groupby(["train_method", "epoch"], as_index=False)["train_loss"]
+        .mean()
+        .sort_values(["train_method", "epoch"])
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for method_name, run_df in agg.groupby("train_method"):
+        ax.plot(
+            run_df["epoch"],
+            run_df["train_loss"],
+            marker="o",
+            markersize=4,
+            linewidth=2.2,
+            label=method_name,
+        )
+    ax.set_title("MNIST Training Loss vs Epoch (Adjoint vs Backprop)")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Cross-Entropy Loss")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="upper right")
+    fig.tight_layout()
+    out_path = outdir / "mnist_loss_by_method.png"
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+    return out_path
+
+
 def plot_summary_bars(summary_df: pd.DataFrame, outdir: Path) -> None:
     names = [_run_label(name, max_len=20) for name in summary_df["run_name"]]
     x = np.arange(len(summary_df))
@@ -235,6 +321,100 @@ def plot_summary_bars(summary_df: pd.DataFrame, outdir: Path) -> None:
     fig.tight_layout()
     fig.savefig(outdir / "mnist_test_acc_summary.png", dpi=220)
     plt.close(fig)
+
+
+def build_method_comparison_tables(
+    runs: list[RunData],
+    summary_df: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    summary_by_run = {row["run_name"]: row for _, row in summary_df.iterrows()}
+    rows = []
+    for run in runs:
+        run_name = run.run_dir.name
+        summary = summary_by_run[run_name]
+        method_label = get_method_label(run.args_row)
+        final = run.final_metrics
+
+        final_test_acc = float(summary["final_test_acc"])
+        fallback_test_error_pct = 100.0 * (1.0 - final_test_acc)
+        fallback_train_time_sec = float(summary["final_time_reported_sec"])
+
+        rows.append(
+            {
+                "run_name": run_name,
+                "method": method_label,
+                "test_error_pct": float(final.get("test_error_pct", fallback_test_error_pct)),
+                "train_gpu_mem_mb": float(final.get("train_gpu_mem_mb", np.nan)),
+                "train_time_sec": float(final.get("train_time_sec", fallback_train_time_sec)),
+                "inference_gpu_mem_mb": float(final.get("inference_gpu_mem_mb", np.nan)),
+                "inference_time_sec": float(final.get("inference_time_sec", np.nan)),
+            }
+        )
+
+    per_run_df = pd.DataFrame(rows).sort_values(["method", "run_name"]).reset_index(drop=True)
+    if per_run_df.empty:
+        return per_run_df, per_run_df
+
+    agg_df = (
+        per_run_df.groupby("method", as_index=False)
+        .agg(
+            n_runs=("run_name", "count"),
+            test_error_pct=("test_error_pct", "mean"),
+            train_gpu_mem_mb=("train_gpu_mem_mb", "mean"),
+            train_time_sec=("train_time_sec", "mean"),
+            inference_gpu_mem_mb=("inference_gpu_mem_mb", "mean"),
+            inference_time_sec=("inference_time_sec", "mean"),
+        )
+        .sort_values("method")
+        .reset_index(drop=True)
+    )
+    return per_run_df, agg_df
+
+
+def plot_method_comparison_table(method_df: pd.DataFrame, outdir: Path) -> Optional[Path]:
+    if method_df.empty:
+        return None
+
+    display_df = method_df.copy()
+    for col in [
+        "test_error_pct",
+        "train_gpu_mem_mb",
+        "train_time_sec",
+        "inference_gpu_mem_mb",
+        "inference_time_sec",
+    ]:
+        display_df[col] = display_df[col].map(lambda x: f"{x:.3f}" if pd.notna(x) else "N/A")
+
+    display_df = display_df.rename(
+        columns={
+            "method": "Method",
+            "n_runs": "Runs",
+            "test_error_pct": "Test Error (%)",
+            "train_gpu_mem_mb": "Training GPU Mem (MB)",
+            "train_time_sec": "Training Time (s)",
+            "inference_gpu_mem_mb": "Inference GPU Mem (MB)",
+            "inference_time_sec": "Inference Time (s)",
+        }
+    )
+
+    fig_h = max(2.8, 1.1 + 0.5 * len(display_df))
+    fig, ax = plt.subplots(figsize=(11, fig_h))
+    ax.axis("off")
+    table = ax.table(
+        cellText=display_df.values,
+        colLabels=display_df.columns,
+        loc="center",
+        cellLoc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.0, 1.35)
+    ax.set_title("MNIST Method Comparison Metrics", pad=12)
+    fig.tight_layout()
+    out_path = outdir / "mnist_method_comparison_table.png"
+    fig.savefig(out_path, dpi=220)
+    plt.close(fig)
+    return out_path
 
 
 def _as_namespace(args_obj):
@@ -444,6 +624,11 @@ def main() -> None:
         default=None,
         help="Run directory name to use for confusion matrix (default: best test-acc run).",
     )
+    parser.add_argument(
+        "--backprop",
+        action="store_true",
+        help="Whether to include runs using the backpropagation method (if precision filter allows).",
+    )
     args = parser.parse_args()
 
     precision_filter = args.precision if args.precision else None
@@ -462,33 +647,38 @@ def main() -> None:
 
     epoch_csv = outdir / "mnist_epoch_metrics.csv"
     summary_csv = outdir / "mnist_summary_metrics.csv"
+    per_run_method_csv = outdir / "mnist_method_comparison_per_run.csv"
+    method_table_csv = outdir / "mnist_method_comparison_table.csv"
     epoch_df.to_csv(epoch_csv, index=False)
     summary_df.to_csv(summary_csv, index=False)
 
     plot_accuracy_curves(epoch_df, outdir)
     plot_runtime_nfe(epoch_df, outdir)
     plot_summary_bars(summary_df, outdir)
+    loss_plot = plot_loss_curves_by_method(epoch_df, outdir)
+    per_run_method_df, method_table_df = build_method_comparison_tables(runs, summary_df)
+    per_run_method_df.to_csv(per_run_method_csv, index=False)
+    method_table_df.to_csv(method_table_csv, index=False)
+    table_plot = plot_method_comparison_table(method_table_df, outdir)
 
     print(f"Processed runs: {len(summary_df)}")
     print(f"Epoch metrics CSV: {epoch_csv}")
     print(f"Summary CSV: {summary_csv}")
+    print(f"Per-run method metrics CSV: {per_run_method_csv}")
+    print(f"Method comparison table CSV: {method_table_csv}")
+    if loss_plot is not None:
+        print(f"Loss-by-method plot: {loss_plot}")
+    else:
+        print("Loss-by-method plot: skipped (no train loss found in logs).")
+    if table_plot is not None:
+        print(f"Method comparison table image: {table_plot}")
     print(f"Plots written to: {outdir}")
     print("\nTop runs by best_test_acc:")
     top = summary_df.sort_values("best_test_acc", ascending=False).head(5)
     print(top[["run_name", "best_test_acc", "final_test_acc", "epoch_of_best_test_acc", "mean_nfe_f", "mean_nfe_b"]].to_string(index=False))
 
-    if args.confusion_matrix:
-        counts_path, norm_path, cm_acc = generate_confusion_matrix_outputs(
-            runs=runs,
-            summary_df=summary_df,
-            outdir=outdir,
-            checkpoint_arg=args.checkpoint,
-            confusion_run_name=args.confusion_run_name,
-        )
-        print("\nConfusion matrix outputs:")
-        print(f"  Counts: {counts_path}")
-        print(f"  Row-normalized: {norm_path}")
-        print(f"  Accuracy from confusion matrix: {cm_acc:.4f}")
+
+
 
 
 if __name__ == "__main__":

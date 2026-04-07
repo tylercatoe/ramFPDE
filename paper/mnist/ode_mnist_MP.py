@@ -1,3 +1,5 @@
+## Mixed Precision Training of Fractional Neural ODEs (MPT-FNDE), MNIST Test Script
+
 import os, sys
 job_id = os.environ.get('SLURM_JOB_ID', '')
 import argparse, time, datetime, random, torch, csv, shutil, logging
@@ -15,6 +17,7 @@ from torch.amp import autocast
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from experiment_runtime import (
     RunningAverageMeter,
+    RunningMaximumMeter,
     setup_environment,
     get_precision_dtype, 
     determine_scaler,
@@ -24,7 +27,7 @@ from experiment_runtime import (
 def create_parser():
     """Create and return the argument parser."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--tol', type=float, default=1e-3, help='Tolerance for FODE solver')
+    #parser.add_argument('--tol', type=float, default=1e-3, help='Tolerance for FODE solver')
     parser.add_argument('--nepochs', type=int, default=160, help='Number of training epochs')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for training')
     parser.add_argument('--lr', type=float, default=0.1, help='Learning rate')
@@ -35,7 +38,7 @@ def create_parser():
 
     parser.add_argument('--precision', type=str, default='float32', choices=['float16', 'bfloat16', 'float32', 'tfloat32'], help='Precision for training')
     parser.add_argument('--method', type=str, default='l1', choices=['l1'], help='Integration method')
-    parser.add_argument('--odeint', type=str, default='rampde', choices=['rampde', 'torchfde','torchdiffeq'], help='ODE solver backend')
+    parser.add_argument('--odeint', type=str, default='rampde', choices=['rampde'], help='ODE solver backend')
     parser.add_argument('--unstable', action='store_true', help='Use unstable ODE formulation (default: stable)')
     parser.add_argument('--no_grad_scaler', action='store_true', help='Disable GradScaler for float16')
     parser.add_argument('--no_dynamic_scaler', action='store_true', help='Disable DynamicScaler for rampde float16')
@@ -49,7 +52,6 @@ def create_parser():
     parser.add_argument('--T', type=float, default = 1.0, help ='Final time')
 
     parser.add_argument("--generate-plots", default=True, action="store_true", help="Whether to generate plots after training completes.")
-    parser.add_argument('--adjoint', action='store_true', help='Use adjoint method for gradient computation')
     return parser
 
 
@@ -100,34 +102,42 @@ class FODEBlock(nn.Module):
         self.odeint_func = odeint_func
 
     def forward(self, z):
-        if not args.adjoint:
-            out = self.odeint_func(self.func, z, beta = self.beta, t = args.T, step_size = args.h, method = 'corrector')
-            return out
+        # if not args.adjoint:
+        #     out = self.odeint_func(self.func, z, beta = self.beta, t = args.T, step_size = args.h, method = 'corrector')
+        #     return out
+        # else:
+        if self.loss_scaler is not None:
+            out = self.odeint_func(self.func, z, self.t_grid, method = 'l1', beta = self.beta, loss_scaler = self.loss_scaler)
         else:
-            if self.loss_scaler is not None:
-                out = self.odeint_func(self.func, z, self.t_grid, method = 'l1', beta = self.beta, loss_scaler = self.loss_scaler)
-            else:
-                out = self.odeint_func(self.func, z, self.t_grid, method = 'l1', beta = self.beta)
-            return out[-1]
+            out = self.odeint_func(self.func, z, self.t_grid, method = 'l1', beta = self.beta)
+        return out[-1]
     
 class MPNFODE_MNIST(nn.Module):
     def __init__(self, width, args, precision, odeint_func, ScalerClass, dynamic_scaler_enabled = False, grad_scaler_enabled = False):
         super().__init__()
+
         N = int(round(args.T / args.h))
 
         # Create t_grid on appropriate device
         device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
         t_grid = torch.linspace(0, args.T, N + 1, device=device)
     
-        # Set scaler to false for now (only high precision)
-        S1 = None
+        # Set scaler
+        if args.odeint == 'rampde' and dynamic_scaler_enabled and ScalerClass is not None:
+            S1 = ScalerClass(precision)
+        elif args.odeint == 'rampde' and args.precision == 'float16' and not dynamic_scaler_enabled:
+            # Explicitly disable internal scaler when using external GradScaler  
+            S1 = False
+        else:
+            S1 = None
+        
         proj_in_layers = [
             nn.Flatten(),
             nn.Linear(784, width),
             nn.ReLU(inplace=True),
         ]
-        if not args.adjoint:
-            from torchfde import fdeint as odeint_func
+        # if not args.adjoint:
+        #     from torchfde import fdeint as odeint_func
         
             
         feature_layers = [
@@ -183,7 +193,7 @@ def get_mnist_loaders(batch_size = 128,
 def one_hot(x, K):
     return np.array(x[:, None] == np.arange(K)[None, :], dtype=int)
 
-def accuracy(model, dataset_loader):
+def accuracy(model, dataset_loader, device):
     total_correct = 0
     for x, y in dataset_loader:
         x = x.to(device)
@@ -297,7 +307,7 @@ def get_logger(logpath, filepath, package_files=[], displaying=True, saving=True
     return logger
 
 
-if __name__ == "__main__": 
+def main():
 
     parser = create_parser()
     args = parser.parse_args()
@@ -309,21 +319,17 @@ if __name__ == "__main__":
 
     makedirs('./results')
     makedirs('./logs')
-    log_mode = "adjoint" if args.adjoint else "backprop"
-    log_name = f"ode_mnist_{log_mode}"
+    
+    log_name = f"ode_mnist_{'adjoint'}"
     if job_id:
         log_name = f"{log_name}_{job_id}"
     log_path = os.path.join("logs", f"{log_name}.log")
     logger = get_logger(logpath=log_path, filepath=os.path.abspath(__file__))
     logger.info(args)
 
-    if args.adjoint: 
-        logger.info("Using adjoint method for gradient computation.")
-        args.odeint = 'rampde'
-    else:
-        args.odeint = 'torchfde'
-        logger.info("Using backpropagation for gradient computation (from torchfde).")
-
+    
+    logger.info("Using adjoint method for gradient computation.")
+    args.odeint = 'rampde'
 
     odeint_func, DynamicScaler = setup_environment(args.odeint, base_dir)
 
@@ -350,113 +356,215 @@ if __name__ == "__main__":
         args=args
     )
 
+    try:
+        model = MPNFODE_MNIST(
+            args.width, 
+            args, 
+            precision,
+            odeint_func,
+            DynamicScaler,
+            dynamic_scaler_enabled=dynamic_scaler_enabled,
+            grad_scaler_enabled=grad_scaler_enabled
+        ).to(device)
 
-    model = MPNFODE_MNIST(
-        args.width, 
-        args, 
-        precision,
-        odeint_func,
-        DynamicScaler,
-        dynamic_scaler_enabled=dynamic_scaler_enabled,
-        grad_scaler_enabled=grad_scaler_enabled
-    ).to(device)
+        logger.info(f"Model architecture:\n{model}")
+        logger.info(f'Number of parameters: {count_parameters(model)}')
 
-    logger.info(f"Model architecture:\n{model}")
-    logger.info(f'Number of parameters: {count_parameters(model)}')
+        criterion = nn.CrossEntropyLoss()
+        train_loader, test_loader, train_eval_loader = get_mnist_loaders(args.batch_size, args.test_batch_size, args.seed)
 
-    criterion = nn.CrossEntropyLoss()
-    train_loader, test_loader, train_eval_loader = get_mnist_loaders(args.batch_size, args.test_batch_size, args.seed)
-
-    data_gen = inf_generator(train_loader)
-    batches_per_epoch = len(train_loader)
-
-    lr_fn = learning_rate_with_decay(
-        batch_size=args.batch_size,
-        batch_denom=128,
-        batches_per_epoch=batches_per_epoch,
-        boundary_epochs=[60,100,140],
-        decay_rates=[1.0, 0.1, 0.01, 0.001],
-        lr=args.lr
-    )
-
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
-
-    best_acc = 0.0
-    batch_time_meter = RunningAverageMeter()
-    f_nfe_meter = RunningAverageMeter()
-    b_nfe_meter = RunningAverageMeter()
-    train_start_time = time.time()
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats(device=device)
-    end = time.time()
-
-    for iter in range(args.nepochs * batches_per_epoch):
-        model.train()
-        lr = lr_fn(iter)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+        data_gen = inf_generator(train_loader)
+        batches_per_epoch = len(train_loader)
         
-        optimizer.zero_grad()
-        x, y = data_gen.__next__()
-        x, y = x.to(device), y.to(device)
-        logits = model(x)
-        loss = criterion(logits, y)
 
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.nepochs*batches_per_epoch, eta_min=1e-4)
+
+        best_acc = 0.0
+        batch_time_meter = RunningAverageMeter()
+        fwd_time_meter = RunningAverageMeter()
+        bwd_time_meter = RunningAverageMeter()
+        train_loss_meter = RunningAverageMeter()
+        f_nfe_meter = RunningAverageMeter()
+        b_nfe_meter = RunningAverageMeter()
+        mem_meter = RunningMaximumMeter()
+        train_start_time = time.time()
         
-        nfe_forward = model.feature_layers[0].func.nfe
-        model.feature_layers[0].func.nfe = 0
 
-        loss.backward()
-        optimizer.step()
 
-        nfe_backward = model.feature_layers[0].func.nfe
-        model.feature_layers[0].func.nfe = 0
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats(device=device)
+        
 
-        batch_time_meter.update(time.time() - end)
 
-        f_nfe_meter.update(nfe_forward)
-        b_nfe_meter.update(nfe_backward)
-        end = time.time()
+        for iter in range(args.nepochs * batches_per_epoch):
+            iter_start = time.perf_counter()
 
-        if iter % batches_per_epoch == 0:
-            with torch.no_grad():
-                train_acc = accuracy(model, train_eval_loader)
-                val_acc = accuracy(model, test_loader)
-                if val_acc > best_acc:
-                    ckpt = {'state_dict': model.state_dict(), 'args': args}
-                    torch.save(ckpt, ckpt_path)
-                    torch.save(ckpt, os.path.join(result_dir, "model.pth"))
-                    best_acc = val_acc
-                logger.info(
-                    "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | Loss {:.6f} | "
-                    "Train Acc {:.4f} | Test Acc {:.4f}".format(
-                        iter // batches_per_epoch, batch_time_meter.val, batch_time_meter.avg, f_nfe_meter.avg,
-                        b_nfe_meter.avg, float(loss.item()), train_acc, val_acc
-                    )
-                )
+            model.train()
+            
+            optimizer.zero_grad()
+            x, y = data_gen.__next__()
+            x, y = x.to(device), y.to(device)
 
-    train_time_sec = time.time() - train_start_time
-    if torch.cuda.is_available():
-        torch.cuda.synchronize(device)
-        train_peak_mem_mb = torch.cuda.max_memory_allocated(device=device) / (1024.0 ** 2)
-    else:
-        train_peak_mem_mb = float("nan")
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(device)
+            fwd_start = time.perf_counter()
+            with autocast(device_type='cuda', dtype=precision):
+                logits = model(x)
+                loss = criterion(logits.float(), y)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(device)
+            fwd_time = time.perf_counter() - fwd_start
 
-    inference_test_acc, inference_time_sec, inference_peak_mem_mb = evaluate_inference_metrics(
-        model, test_loader, device
-    )
-    test_error_pct = 100.0 * (1.0 - inference_test_acc)
-    method_name = "adjoint" if args.adjoint else "backprop"
-    logger.info(
+            
+            nfe_forward = model.feature_layers[0].func.nfe
+            model.feature_layers[0].func.nfe = 0
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(device)
+            bwd_start = time.perf_counter()
+            
+            # Handle backward pass with or without loss scaling
+            if loss_scaler is not None:
+                # Track loss scale before step
+                old_scale = loss_scaler.get_scale()
+                
+                # Use gradient scaling for torchdiffeq with float16
+                loss_scaler.scale(loss).backward()
+                loss_scaler.step(optimizer)
+                loss_scaler.update()
+                
+                # Track loss scale after step and log changes
+                new_scale = loss_scaler.get_scale()
+                if old_scale != new_scale:
+                    print(f"Iteration {iter}: Loss scale changed from {old_scale} to {new_scale} (gradient overflow detected)")
+                elif iter < 20 or iter % 100 == 0:  # Log scale periodically for first 20 iterations or every 100
+                    print(f"Iteration {iter}: Loss scale = {new_scale} (no overflow)")
+                
+                # Only step scheduler if no overflow occurred (scale didn't change)
+                if old_scale == new_scale:
+                    scheduler.step()
+                else:
+                    print(f"Iteration {iter}: Skipping scheduler step due to gradient overflow")
+            else:
+                # Standard backward pass
+                loss.backward()
+                optimizer.step()
+                scheduler.step()
+
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(device)
+            bwd_time = time.perf_counter() - bwd_start
+
+            peak_memory = torch.cuda.max_memory_allocated(device=device) / (1024.0 ** 2) if torch.cuda.is_available() else float("nan")
+
+            nfe_backward = model.feature_layers[0].func.nfe
+            model.feature_layers[0].func.nfe = 0
+
+            if not torch.isfinite(loss).all():
+                print(f"Training stopped at iteration {iter}: Loss is {'NaN' if torch.isnan(loss).any() else 'infinite'}")
+                print(f"Loss value: {loss.item()}")
+                print("Saving current model state before stopping...")
+                torch.save({
+                    'state_dict': model.state_dict(), 
+                    'args': args,
+                    'iteration': iter,
+                    'loss': loss.item()
+                }, ckpt_path.replace('.pth', '_emergency_stop.pth'))
+                return  # Exit the training function
+            
+            # Check for NaN gradients (outside timed zone)
+            # Only stop training for NaN gradients if we're not using gradient scaling
+            # When using GradScaler, NaN/inf gradients are expected and handled automatically
+            if loss_scaler is None:
+                has_nan_grad = False
+                for name, param in model.named_parameters():
+                    if param.grad is not None and not torch.isfinite(param.grad).all():
+                        print(f"Training stopped at iteration {iter}: NaN/infinite gradient detected in parameter '{name}'")
+                        print(f"Gradient stats - min: {param.grad.min().item()}, max: {param.grad.max().item()}")
+                        has_nan_grad = True
+                        break
+                
+                if has_nan_grad:
+                    print("Saving current model state before stopping...")
+                    torch.save({
+                        'state_dict': model.state_dict(), 
+                        'args': args,
+                        'iteration': iter,
+                        'loss': loss.item()
+                    }, ckpt_path.replace('.pth', '_gradient_nan_stop.pth'))
+                    return  # Exit the training function
+            else:
+                # When using gradient scaling, just log if we encounter NaN gradients
+                # but don't stop training as GradScaler handles this automatically
+                has_nan_grad = False
+                for name, param in model.named_parameters():
+                    if param.grad is not None and not torch.isfinite(param.grad).all():
+                        print(f"NaN/inf gradients detected in '{name}' at iteration {iter} - GradScaler will handle this")
+                        has_nan_grad = True
+                        break
+                
+                # Also log if we have finite gradients for comparison
+                if not has_nan_grad and (iter < 5 or iter % 50 == 0):
+                    print(f"Iteration {iter}: All gradients are finite")
+
+            fwd_time_meter.update(fwd_time)
+            bwd_time_meter.update(bwd_time)
+            train_loss_meter.update(loss.item())
+            mem_meter.update(peak_memory)
+            f_nfe_meter.update(nfe_forward)
+            b_nfe_meter.update(nfe_backward)
+            batch_time_meter.update(time.perf_counter() - iter_start)
+
+            if iter % batches_per_epoch == 0:
+                with torch.no_grad():
+                    with autocast(device_type='cuda', dtype=precision):
+                        train_acc = accuracy(model, train_eval_loader, device)
+                        val_acc = accuracy(model, test_loader, device)
+                        if val_acc > best_acc:
+                            ckpt = {'state_dict': model.state_dict(), 'args': args}
+                            torch.save(ckpt, ckpt_path)
+                            torch.save(ckpt, os.path.join(result_dir, "model.pth"))
+                            best_acc = val_acc
+                        current_lr = optimizer.param_groups[0]['lr']
+                        logger.info(
+                            "Epoch {:04d} | LR {:.4f} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | Loss {:.6f} | "
+                            "Train Acc {:.4f} | Test Acc {:.4f}".format(
+                                iter // batches_per_epoch, current_lr, batch_time_meter.val, batch_time_meter.avg, f_nfe_meter.avg,
+                                b_nfe_meter.avg, float(loss.item()), train_acc, val_acc
+                            )
+                        )
+        train_time_sec = time.time() - train_start_time
+        if torch.cuda.is_available():
+            torch.cuda.synchronize(device)
+            train_peak_mem_mb = torch.cuda.max_memory_allocated(device=device) / (1024.0 ** 2)
+        else:
+            train_peak_mem_mb = float("nan")
+        inference_test_acc, inference_time_sec, inference_peak_mem_mb = evaluate_inference_metrics(
+            model, test_loader, device
+        )
+        test_error_pct = 100.0 * (1.0 - inference_test_acc)
+        logger.info(
         "FINAL_METRICS | Method {} | TestErrorPct {:.4f} | TrainGPUMemMB {:.2f} | "
         "TrainTimeSec {:.3f} | InferenceGPUMemMB {:.2f} | InferenceTimeSec {:.3f} | "
         "InferenceTestAcc {:.4f}".format(
-            method_name,
+            'MP Adjoint',
             test_error_pct,
             float(train_peak_mem_mb),
             float(train_time_sec),
             float(inference_peak_mem_mb),
             float(inference_time_sec),
             float(inference_test_acc),
+            )
         )
-    )
+
+
+
+    finally:
+        if 'log_file' in locals() and log_file:
+            log_file.close()
+            sys.stdout = sys.__stdout__
+            sys.stderr = sys.__stderr__
+
+if __name__ == "__main__":
+    main()

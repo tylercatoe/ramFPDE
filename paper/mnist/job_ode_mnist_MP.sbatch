@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=ode_mnist
-#SBATCH --output=slurm_logs/ode_mnist_%j.out
-#SBATCH --error=slurm_logs/ode_mnist_%j.err
+#SBATCH --job-name=ode_mnist_mp
+#SBATCH --output=slurm_logs/ode_mnist_mp_%j.out
+#SBATCH --error=slurm_logs/ode_mnist_mp_%j.err
 #SBATCH --partition=work1
 #SBATCH --time=34:00:00
 #SBATCH --gres=gpu:h200:1
@@ -26,9 +26,9 @@ echo "Running on nodes: $SLURM_NODELIST"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Execute the driver script and pass along all arguments.
-conda run -n torch28 python -u ode_mnist.py "$@"
+conda run -n torch28 python -u ode_mnist_MP.py "$@"
 
-# Wait a few seconds to ensure the driver has finished writing result_dir.txt.
+# Wait a few seconds to ensure the driver has finished writing result_dir_<jobid>.txt.
 sleep 10
 
 RESULT_FILE="result_dir_${SLURM_JOB_ID}.txt"
@@ -40,5 +40,5 @@ else
 fi
 
 # Move the SLURM log files into the results directory.
-# mv slurm_logs/ode_mnist_${SLURM_JOB_ID}.out ${RESULT_DIR}/slurm_log.out
-# mv slurm_logs/ode_mnist_${SLURM_JOB_ID}.err ${RESULT_DIR}/slurm_log.err
+# mv slurm_logs/ode_mnist_mp_${SLURM_JOB_ID}.out ${RESULT_DIR}/slurm_log.out
+# mv slurm_logs/ode_mnist_mp_${SLURM_JOB_ID}.err ${RESULT_DIR}/slurm_log.err
