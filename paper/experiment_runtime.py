@@ -42,7 +42,11 @@ def setup_environment(odeint_type: str, base_dir: str) -> Tuple:
         from rampde import odeint
         from rampde.loss_scalers import DynamicScaler
         return odeint, DynamicScaler
-    else:    
+    elif odeint_type == 'torchfde':
+        print("Using torchfde")
+        from torchfde import fdeint
+        return fdeint, None
+    else:
         print("Using torchdiffeq")
         from torchdiffeq import odeint
         return odeint, None
@@ -233,9 +237,14 @@ def setup_experiment(
     ckpt_path = os.path.join(result_dir, 'ckpt.pth')
     os.makedirs(result_dir, exist_ok=True)
     
-    # Save result directory path for reference
+    # Save result directory path for reference.
+    # Keep generic filename for backward compatibility and also write
+    # a job-specific file when running under SLURM to avoid collisions.
     with open("result_dir.txt", "w") as f:
         f.write(result_dir)
+    if job_id:
+        with open(f"result_dir_{job_id}.txt", "w") as f:
+            f.write(result_dir)
     
     # Save all parameters to CSV for easy loading
     args_dict = {
